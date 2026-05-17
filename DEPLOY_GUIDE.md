@@ -11,10 +11,11 @@
 - [x] Notion DB kết nối thành công
 - [x] MiniMax AI hoạt động
 - [x] Test local OK (`npm run dev`)
-- [ ] Lấy Telegram Chat ID
-- [ ] Deploy lên Cloudflare
-- [ ] Set production secrets
-- [ ] Set Telegram webhook
+- [x] Lấy Telegram Chat ID → `1649694558`
+- [x] Deploy lên Cloudflare → `https://warroom.rocky13.workers.dev`
+- [x] Set production secrets (7/7)
+- [x] Set Telegram webhook
+- [x] Push to GitHub → `https://github.com/matt-dinh13/warroom`
 
 ---
 
