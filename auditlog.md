@@ -155,7 +155,110 @@ Add Backlog capture (links, videos, ideas without deadline) and browse functiona
 | Backlog browse via chat | ✅ Pass | "có gì làm không?" → shows 1 item grouped by LEARN |
 | Production deploy v1.2 | ✅ Pass | `wrangler deploy` → `a197bd10` |
 
+## 2026-05-17 (Night) — Security Hardening + UX (v2.0)
+
+### Scope
+Nâng cấp bảo mật và UX: SHA-256 auth, rate limiting, datetime injection, chat history.
+
+### Changes Made
+
+| File | Change | Impact |
+|------|--------|--------|
+| `src/auth.js` | Rewrite: SHA-256 hashing (crypto.subtle) + salt | Passwords never stored in plain text |
+| `src/auth.js` | Secure + HttpOnly + SameSite=Strict cookies | Chống XSS + CSRF |
+| `src/index.js` | Rate limiter (30 req/min per IP via CF-Connecting-IP) | Chống brute force |
+| `src/index.js` | `await isAuthenticated()` (async due to SHA-256) | Consistent async auth |
+| `src/triage.js` | Inject VN datetime + day type + block into AI messages | AI biết thời gian |
+| `public/app.js` | localStorage chat history (50 msg, restore on load) | Messages survive refresh |
+
+### Technical Decisions
+
+#### D8: SHA-256 Password Hashing
+- **Decision:** Hash password with SHA-256 + salt using Web Crypto API
+- **Reason:** `crypto.subtle` available in Workers, zero dependencies
+- **Impact:** Auth functions now async. Cookie value is `wrm_` + hex hash
+
+#### D9: Rate Limiting (In-Memory)
+- **Decision:** Per-isolate Map with 60s window, 30 req max
+- **Reason:** Lightweight, no external dependency, sufficient for single-user
+- **Impact:** Resets when Worker isolate recycles (acceptable tradeoff)
+
+---
+
+## 2026-05-17 (Night) — Full Sprint 2+3 (v2.1)
+
+### Scope
+Conversation memory, EDIT intent, fuzzy search, CAPTURE_SPLIT, Telegram UI overhaul.
+
+### Changes Made
+
+| File | Change | Impact |
+|------|--------|--------|
+| `wrangler.toml` | Added KV namespace `CHAT_MEMORY` binding | Conversation persistence |
+| `src/minimax.js` | Multi-turn message support (accepts full messages array) | Enables conversation context |
+| `src/triage.js` | Full rewrite: KV memory (5 msg × 1h), EDIT handler, CAPTURE_SPLIT | AI remembers context |
+| `src/triage.js` | Enhanced response builders: card layout, load bars, project breakdown | Better readability |
+| `src/notion.js` | Fuzzy search: diacritics normalization + word-level scoring (≥30) | Vietnamese text matching |
+| `src/notion.js` | `editTask()`: update deadline/urgency/estimate/project/energy/block | EDIT support |
+| `src/prompts.js` | Added EDIT, CAPTURE_SPLIT intents, datetime awareness, sub-task rules | Expanded AI capabilities |
+| `src/telegram.js` | Inline keyboard (Plan/Backlog/Load/Overdue/Report buttons) | 1-tap actions |
+| `src/telegram.js` | `parse_mode: Markdown` + auto-fallback | Better formatting |
+| `src/telegram.js` | Callback query handler + `/edit` command | Inline button support |
+
+### Technical Decisions
+
+#### D10: KV vs D1 for Conversation Memory
+- **Decision:** KV with 1h TTL, 5 message pairs max
+- **Reason:** Lightweight, auto-expire, no schema needed. D1 overkill for ephemeral context.
+- **Impact:** Memory resets after 1h inactivity — acceptable for ADHD use case (sessions are short)
+
+#### D11: Fuzzy Search Algorithm
+- **Decision:** Custom scoring: exact (100) > substring (80/70) > word-match (0-60)
+- **Reason:** Vietnamese text needs diacritics stripping (`NFD + regex`), simple Levenshtein too slow
+- **Impact:** "workshop" matches "BA [AI] - Workshop set up", threshold ≥ 30
+
+#### D12: Telegram Markdown Fallback
+- **Decision:** Send with `parse_mode: Markdown`, retry without if Telegram API returns parse error
+- **Reason:** Some AI responses contain unescaped Markdown chars that break Telegram
+- **Impact:** Clean formatting when possible, plain text as safe fallback
+
+### Verification Results
+
+| Test | Result | Notes |
+|------|--------|-------|
+| Web login (SHA-256) | ✅ Pass | New hash format `wrm_...` |
+| "plan today" → card layout | ✅ Pass | Load bar + emoji numbers |
+| "check load" → datetime aware | ✅ Pass | Shows correct VN time + day type |
+| KV binding active | ✅ Pass | Deploy confirms CHAT_MEMORY bound |
+| Git push | ✅ Pass | main → `0806057` |
+
+---
+
 ## Template for Future Entries
+
+```markdown
+## YYYY-MM-DD — [Title]
+
+### Scope
+Brief description of what was done.
+
+### Changes Made
+- File changes with rationale
+
+### Technical Decisions
+#### DN: [Decision Title]
+- **Decision:** What was decided
+- **Reason:** Why
+- **Impact:** What changed as a result
+
+### Verification Results
+| Test | Result | Notes |
+|------|--------|-------|
+
+### Notes
+Any additional context.
+```
+
 
 ```markdown
 ## YYYY-MM-DD — [Title]
