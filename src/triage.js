@@ -1,17 +1,45 @@
 // Triage logic — orchestrate MiniMax AI + Notion actions
+// v2.0: conversation memory, EDIT, CAPTURE_SPLIT, better formatting
 
 import { callMiniMax } from './minimax.js';
-import { createTask, queryTasks, updateTaskStatus } from './notion.js';
+import { createTask, queryTasks, updateTaskStatus, editTask } from './notion.js';
 import { SYSTEM_PROMPT } from './prompts.js';
+
+// ─── Conversation Memory ─────────────────────────────
+
+const MEMORY_TTL = 3600; // 1 hour
+const MAX_MEMORY = 5; // last 5 messages
+
+async function getConversation(chatId, env) {
+  if (!env.CHAT_MEMORY) return [];
+  try {
+    const data = await env.CHAT_MEMORY.get(`chat:${chatId}`, 'json');
+    return data || [];
+  } catch { return []; }
+}
+
+async function saveConversation(chatId, messages, env) {
+  if (!env.CHAT_MEMORY) return;
+  try {
+    // Keep only last MAX_MEMORY exchanges
+    const trimmed = messages.slice(-MAX_MEMORY * 2);
+    await env.CHAT_MEMORY.put(`chat:${chatId}`, JSON.stringify(trimmed), {
+      expirationTtl: MEMORY_TTL,
+    });
+  } catch {}
+}
+
+// ─── Main Entry ──────────────────────────────────────
 
 /**
  * Process a chat message: AI parse → Notion action → response
  * @param {string} userMessage - User's chat input
  * @param {object} env - Cloudflare env bindings
+ * @param {string} chatId - User identifier for conversation memory
  * @returns {Promise<object>} { response_text, intent, ... }
  */
-export async function processChat(userMessage, env) {
-  // Step 0: Inject datetime context for AI
+export async function processChat(userMessage, env, chatId = 'web') {
+  // Step 0: Inject datetime context
   const now = new Date();
   const vnDate = new Date(now.getTime() + 7 * 60 * 60 * 1000);
   const dayNames = ['Chủ Nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
@@ -23,12 +51,24 @@ export async function processChat(userMessage, env) {
   const vnHour = vnDate.getUTCHours();
   const block = vnHour < 12 ? '☀️ AM' : vnHour < 18 ? '🌤️ PM' : '🌙 Evening';
 
-  const dateContext = `[Context: ${dayNames[dayNum]} ${vnDate.getUTCDate()}/${vnDate.getUTCMonth() + 1}/${vnDate.getUTCFullYear()}, ${vnHour}:${String(vnDate.getUTCMinutes()).padStart(2, '0')}, ${dayType}, capacity ${capacity}p, current block: ${block}]`;
+  const dateContext = `[Context: ${dayNames[dayNum]} ${vnDate.getUTCDate()}/${vnDate.getUTCMonth() + 1}/${vnDate.getUTCFullYear()}, ${vnHour}:${String(vnDate.getUTCMinutes()).padStart(2, '0')}, ${dayType}, capacity ${capacity}p, block: ${block}]`;
 
-  const enrichedMessage = `${dateContext}\n${userMessage}`;
+  // Step 1: Build conversation with memory
+  const history = await getConversation(chatId, env);
+  const messages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...history,
+    { role: 'user', content: `${dateContext}\n${userMessage}` },
+  ];
 
-  // Step 1: Call AI to parse intent + extract data
-  const aiResult = await callMiniMax(SYSTEM_PROMPT, enrichedMessage, env.MINIMAX_API_KEY);
+  const aiResult = await callMiniMax(null, null, env.MINIMAX_API_KEY, messages);
+
+  // Save to memory
+  history.push(
+    { role: 'user', content: userMessage },
+    { role: 'assistant', content: aiResult.response_text || '' }
+  );
+  await saveConversation(chatId, history, env);
 
   // Step 2: Execute Notion action based on AI response
   let notionResult = null;
@@ -44,7 +84,6 @@ export async function processChat(userMessage, env) {
         case 'query':
           notionResult = await queryTasks(action.data?.query_type || 'today', env);
 
-          // If AI returned TRIAGE, build a better response with actual data
           if (aiResult.intent === 'TRIAGE' && Array.isArray(notionResult)) {
             aiResult.response_text = buildTriageResponse(notionResult);
           } else if (aiResult.intent === 'OVERDUE_CHECK' && Array.isArray(notionResult)) {
@@ -66,10 +105,57 @@ export async function processChat(userMessage, env) {
               env
             );
             if (!notionResult) {
-              aiResult.response_text = `❌ Không tìm thấy task "${action.data.task_title}". Thử gõ chính xác hơn?`;
+              aiResult.response_text = `❌ Không tìm thấy task "${action.data.task_title}".\n💡 Gõ chính xác hơn hoặc dùng từ khóa chính.`;
             }
           }
           break;
+
+        case 'edit':
+          if (action.data?.task_title && action.data?.updates) {
+            notionResult = await editTask(
+              action.data.task_title,
+              action.data.updates,
+              env
+            );
+            if (!notionResult) {
+              aiResult.response_text = `❌ Không tìm thấy task "${action.data.task_title}".`;
+            } else {
+              const changes = Object.entries(action.data.updates)
+                .map(([k, v]) => `  • ${k}: ${v}`)
+                .join('\n');
+              aiResult.response_text = `✏️ Đã cập nhật "${notionResult.title}":\n${changes}`;
+            }
+          }
+          break;
+      }
+
+      // Handle CAPTURE_SPLIT: create parent + sub-tasks
+      if (aiResult.intent === 'CAPTURE_SPLIT' && action.data?.parent && action.data?.subtasks) {
+        const parent = await createTask(action.data.parent, env);
+        const parentTitle = action.data.parent.title;
+        const subtaskResults = [];
+
+        for (const sub of action.data.subtasks) {
+          const subtask = {
+            ...sub,
+            project: action.data.parent.project,
+            urgency: action.data.parent.urgency,
+            source: action.data.parent.source,
+            context: `Sub-task of: ${parentTitle}`,
+          };
+          await createTask(subtask, env);
+          subtaskResults.push(sub);
+        }
+
+        let response = `✅ Đã tạo + chia nhỏ task:\n${'─'.repeat(24)}\n\n`;
+        response += `📌 ${parentTitle}\n`;
+        response += `   📂 ${action.data.parent.project || '?'} · ${action.data.parent.urgency || ''}\n\n`;
+        response += `📦 ${subtaskResults.length} sub-tasks:\n`;
+        subtaskResults.forEach((s, i) => {
+          const est = s.estimate ? `${s.estimate}p` : '?p';
+          response += `  ${i + 1}. ${s.title} — ${est}\n`;
+        });
+        aiResult.response_text = response;
       }
     } catch (err) {
       console.error('Notion action error:', err);
@@ -202,13 +288,29 @@ function buildReportResponse(tasks) {
   const completed = tasks.filter(t => t.status === 'Completed');
   const totalTime = completed.reduce((sum, t) => sum + (t.estimate || 0), 0);
 
+  // Group by project
+  const byProject = {};
+  completed.forEach(t => {
+    const proj = t.project || '?';
+    byProject[proj] = (byProject[proj] || 0) + 1;
+  });
+
   let response = `📊 Weekly Report\n${'─'.repeat(24)}\n\n`;
   response += `✅ Completed: ${completed.length} tasks (~${Math.round(totalTime / 60)}h)\n`;
 
+  // Project breakdown
+  if (Object.keys(byProject).length > 0) {
+    response += '\n📂 By project:\n';
+    for (const [proj, count] of Object.entries(byProject).sort((a, b) => b[1] - a[1])) {
+      response += `  • ${proj}: ${count}\n`;
+    }
+  }
+
   if (completed.length) {
-    response += '\n';
+    response += '\n✅ Tasks:\n';
     completed.slice(0, 10).forEach((t) => {
-      response += `  ✅ [${t.project}] ${t.title}\n`;
+      const est = t.estimate ? ` (${t.estimate}p)` : '';
+      response += `  • [${t.project}] ${t.title}${est}\n`;
     });
     if (completed.length > 10) {
       response += `  ... +${completed.length - 10} nữa`;

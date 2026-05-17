@@ -1,16 +1,26 @@
-// MiniMax API client — direct MiniMax API
+// MiniMax API client — supports multi-turn conversation
 
 const MINIMAX_BASE_URL = 'https://api.minimaxi.chat/v1';
 const MODEL = 'MiniMax-M2.7';
 
 /**
  * Call MiniMax chat completion API
- * @param {string} systemPrompt - System prompt
- * @param {string} userMessage - User message
+ * Supports two modes:
+ * - Legacy: callMiniMax(systemPrompt, userMessage, apiKey)
+ * - Multi-turn: callMiniMax(null, null, apiKey, messagesArray)
+ *
+ * @param {string|null} systemPrompt - System prompt (null if using messages array)
+ * @param {string|null} userMessage - User message (null if using messages array)
  * @param {string} apiKey - MiniMax API key
+ * @param {Array|null} messages - Full messages array for multi-turn
  * @returns {Promise<object>} Parsed JSON response from AI
  */
-export async function callMiniMax(systemPrompt, userMessage, apiKey) {
+export async function callMiniMax(systemPrompt, userMessage, apiKey, messages = null) {
+  const msgPayload = messages || [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage },
+  ];
+
   const response = await fetch(`${MINIMAX_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -19,10 +29,7 @@ export async function callMiniMax(systemPrompt, userMessage, apiKey) {
     },
     body: JSON.stringify({
       model: MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage },
-      ],
+      messages: msgPayload,
       temperature: 0.3,
       response_format: { type: 'json_object' },
     }),

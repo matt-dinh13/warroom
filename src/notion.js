@@ -117,7 +117,7 @@ export async function createTask(taskData, env) {
 
 /**
  * Query tasks from Notion with filters
- * @param {string} queryType - "today" | "overdue" | "all_active" | "weekly_report"
+ * @param {string} queryType - "today" | "overdue" | "all_active" | "weekly_report" | "backlog"
  */
 export async function queryTasks(queryType, env) {
   let filter;
@@ -202,20 +202,85 @@ export async function queryTasks(queryType, env) {
   return data.results.map(parseNotionTask);
 }
 
+// ─── Fuzzy Search ────────────────────────────────────
+
+/**
+ * Normalize text for fuzzy matching (remove diacritics, lowercase)
+ */
+function normalizeText(str) {
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // strip diacritics
+    .replace(/đ/g, 'd')
+    .replace(/[^\w\s]/g, '') // remove special chars
+    .trim();
+}
+
+/**
+ * Score how well a query matches a task title
+ * Higher score = better match. Returns 0 if no match.
+ */
+function fuzzyScore(query, title) {
+  const nq = normalizeText(query);
+  const nt = normalizeText(title);
+
+  // Exact match
+  if (nt === nq) return 100;
+
+  // Substring match
+  if (nt.includes(nq)) return 80;
+  if (nq.includes(nt)) return 70;
+
+  // Word-level match: count how many query words appear in title
+  const queryWords = nq.split(/\s+/).filter(w => w.length > 1);
+  const titleWords = nt.split(/\s+/);
+
+  if (queryWords.length === 0) return 0;
+
+  let matchedWords = 0;
+  for (const qw of queryWords) {
+    if (titleWords.some(tw => tw.includes(qw) || qw.includes(tw))) {
+      matchedWords++;
+    }
+  }
+
+  const wordScore = Math.round((matchedWords / queryWords.length) * 60);
+  return wordScore;
+}
+
+/**
+ * Find best matching task from a list
+ * Returns null if no decent match found (score < 30)
+ */
+function findBestMatch(tasks, searchTitle) {
+  let bestMatch = null;
+  let bestScore = 0;
+
+  for (const task of tasks) {
+    const title = task.properties?.Name?.title?.[0]?.text?.content || '';
+    const score = fuzzyScore(searchTitle, title);
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = task;
+    }
+  }
+
+  return bestScore >= 30 ? bestMatch : null;
+}
+
 /**
  * Update a task's status by searching for it by title (fuzzy)
  */
 export async function updateTaskStatus(taskTitle, newStatus, env) {
-  // Map War Room status to existing DB status
   const statusMap = {
     '✅ Done': 'Completed',
-    '❌ Dropped': 'Completed', // No "Dropped" in existing DB, use Completed
+    '❌ Dropped': 'Completed',
     'Done': 'Completed',
     'Dropped': 'Completed',
   };
   const mappedStatus = statusMap[newStatus] || newStatus;
 
-  // Search for the task in active items
   const searchResponse = await fetch(
     `${NOTION_BASE}/databases/${env.NOTION_TASKS_DB_ID}/query`,
     {
@@ -236,21 +301,12 @@ export async function updateTaskStatus(taskTitle, newStatus, env) {
   }
 
   const searchData = await searchResponse.json();
-  const tasks = searchData.results;
-
-  // Fuzzy match by title
-  const normalizedSearch = taskTitle.toLowerCase().trim();
-  const match = tasks.find((t) => {
-    const title = t.properties?.Name?.title?.[0]?.text?.content || '';
-    return title.toLowerCase().includes(normalizedSearch) ||
-           normalizedSearch.includes(title.toLowerCase());
-  });
+  const match = findBestMatch(searchData.results, taskTitle);
 
   if (!match) {
     return null;
   }
 
-  // Update status
   const updateResponse = await fetch(`${NOTION_BASE}/pages/${match.id}`, {
     method: 'PATCH',
     headers: notionHeaders(env.NOTION_API_KEY),
@@ -263,6 +319,76 @@ export async function updateTaskStatus(taskTitle, newStatus, env) {
 
   if (!updateResponse.ok) {
     throw new Error(`Notion update error: ${await updateResponse.text()}`);
+  }
+
+  return parseNotionTask(await updateResponse.json());
+}
+
+/**
+ * Edit task properties (deadline, urgency, estimate, project, etc.)
+ */
+export async function editTask(taskTitle, updates, env) {
+  // Search for task
+  const searchResponse = await fetch(
+    `${NOTION_BASE}/databases/${env.NOTION_TASKS_DB_ID}/query`,
+    {
+      method: 'POST',
+      headers: notionHeaders(env.NOTION_API_KEY),
+      body: JSON.stringify({
+        filter: {
+          property: 'State',
+          status: { does_not_equal: 'Completed' },
+        },
+        page_size: 100,
+      }),
+    }
+  );
+
+  if (!searchResponse.ok) {
+    throw new Error(`Notion search error: ${await searchResponse.text()}`);
+  }
+
+  const searchData = await searchResponse.json();
+  const match = findBestMatch(searchData.results, taskTitle);
+
+  if (!match) {
+    return null;
+  }
+
+  // Build update properties
+  const properties = {};
+
+  if (updates.deadline) {
+    properties['Deadline'] = { date: { start: updates.deadline } };
+  }
+  if (updates.urgency) {
+    properties['Urgency'] = { select: { name: updates.urgency } };
+  }
+  if (updates.estimate) {
+    properties['Estimate'] = { number: updates.estimate };
+  }
+  if (updates.project) {
+    properties['Context'] = { select: { name: updates.project } };
+  }
+  if (updates.energy) {
+    properties['Energy'] = { select: { name: updates.energy } };
+  }
+  if (updates.block) {
+    properties['Block'] = { select: { name: updates.block } };
+  }
+
+  if (Object.keys(properties).length === 0) {
+    return parseNotionTask(match); // Nothing to update
+  }
+
+  const updateResponse = await fetch(`${NOTION_BASE}/pages/${match.id}`, {
+    method: 'PATCH',
+    headers: notionHeaders(env.NOTION_API_KEY),
+    body: JSON.stringify({ properties }),
+  });
+
+  if (!updateResponse.ok) {
+    throw new Error(`Notion edit error: ${await updateResponse.text()}`);
   }
 
   return parseNotionTask(await updateResponse.json());

@@ -1,18 +1,19 @@
-// Telegram Bot handler — webhook + send message utilities
+// Telegram Bot handler — webhook + Markdown + inline keyboard
 
 const TELEGRAM_API = 'https://api.telegram.org/bot';
 
 /**
  * Handle incoming Telegram webhook update
- * @param {object} update - Telegram update object
- * @param {object} env - Cloudflare env
- * @param {function} processChat - The triage function to reuse
- * @returns {Promise<Response>}
  */
 export async function handleTelegramWebhook(update, env, processChat) {
+  // Handle inline keyboard callback
+  if (update.callback_query) {
+    return await handleCallbackQuery(update.callback_query, env, processChat);
+  }
+
   const message = update.message;
   if (!message || !message.text) {
-    return new Response('OK'); // Ignore non-text messages
+    return new Response('OK');
   }
 
   const chatId = message.chat.id;
@@ -37,18 +38,20 @@ export async function handleTelegramWebhook(update, env, processChat) {
       '⚔️ *War Room Online*\n\n' +
       'Gõ task hoặc dùng commands:\n' +
       '• `/plan` — Plan hôm nay\n' +
-      '• `/backlog` — Xem ý tưởng/link đã lưu\n' +
+      '• `/backlog` — Xem ý tưởng/link\n' +
       '• `/overdue` — Check task quá hạn\n' +
       '• `/load` — Check load\n' +
       '• `/report` — Weekly report\n' +
       '• `/done [task]` — Đánh dấu xong\n' +
-      '\nGửi link/video/idea → lưu vào Backlog.',
-      'Markdown'
+      '• `/edit [task]` — Sửa task\n' +
+      '\nGửi link/video/idea → lưu Backlog.',
+      'Markdown',
+      buildMainKeyboard()
     );
     return new Response('OK');
   }
 
-  // Map Telegram commands to chat messages
+  // Map commands
   const commandMap = {
     '/plan': 'plan today',
     '/overdue': 'bỏ quên gì không?',
@@ -59,9 +62,10 @@ export async function handleTelegramWebhook(update, env, processChat) {
 
   let chatMessage = text;
 
-  // Handle /done command
   if (text.startsWith('/done ')) {
     chatMessage = `xong ${text.substring(6)}`;
+  } else if (text.startsWith('/edit ')) {
+    chatMessage = `sửa ${text.substring(6)}`;
   } else if (commandMap[text]) {
     chatMessage = commandMap[text];
   }
@@ -74,18 +78,22 @@ export async function handleTelegramWebhook(update, env, processChat) {
   });
 
   try {
-    // Reuse the same triage logic as web chat
-    const result = await processChat(chatMessage, env);
+    const result = await processChat(chatMessage, env, String(chatId));
 
-    // Format response for Telegram
     let responseText = result.response_text || 'Không có response.';
 
-    // Add follow-up question if any
     if (result.follow_up_question) {
       responseText += `\n\n❓ ${result.follow_up_question}`;
     }
 
-    await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, responseText);
+    // Escape Markdown special chars in task data but keep our formatting
+    await sendTelegramMessage(
+      env.TELEGRAM_BOT_TOKEN,
+      chatId,
+      responseText,
+      'Markdown',
+      buildMainKeyboard()
+    );
   } catch (err) {
     console.error('Telegram handler error:', err);
     await sendTelegramMessage(
@@ -99,9 +107,81 @@ export async function handleTelegramWebhook(update, env, processChat) {
 }
 
 /**
- * Send a message via Telegram Bot API
+ * Handle inline keyboard callback queries
  */
-export async function sendTelegramMessage(botToken, chatId, text, parseMode = null) {
+async function handleCallbackQuery(query, env, processChat) {
+  const chatId = query.message.chat.id;
+  const data = query.data;
+
+  // Acknowledge the callback
+  await fetch(`${TELEGRAM_API}${env.TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ callback_query_id: query.id }),
+  });
+
+  const actionMap = {
+    'action_plan': 'plan today',
+    'action_backlog': 'có gì làm không?',
+    'action_load': 'check load',
+    'action_overdue': 'bỏ quên gì không?',
+    'action_report': 'weekly report',
+  };
+
+  const chatMessage = actionMap[data];
+  if (!chatMessage) return new Response('OK');
+
+  // Show typing
+  await fetch(`${TELEGRAM_API}${env.TELEGRAM_BOT_TOKEN}/sendChatAction`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, action: 'typing' }),
+  });
+
+  try {
+    const result = await processChat(chatMessage, env, String(chatId));
+    await sendTelegramMessage(
+      env.TELEGRAM_BOT_TOKEN,
+      chatId,
+      result.response_text || 'Không có response.',
+      'Markdown',
+      buildMainKeyboard()
+    );
+  } catch (err) {
+    console.error('Callback error:', err);
+    await sendTelegramMessage(
+      env.TELEGRAM_BOT_TOKEN,
+      chatId,
+      `⚠️ Lỗi: ${err.message?.substring(0, 100) || 'Unknown'}`
+    );
+  }
+
+  return new Response('OK');
+}
+
+/**
+ * Build inline keyboard with main actions
+ */
+function buildMainKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: '📋 Plan', callback_data: 'action_plan' },
+        { text: '💡 Backlog', callback_data: 'action_backlog' },
+        { text: '📊 Load', callback_data: 'action_load' },
+      ],
+      [
+        { text: '⚠️ Overdue', callback_data: 'action_overdue' },
+        { text: '📊 Report', callback_data: 'action_report' },
+      ],
+    ],
+  };
+}
+
+/**
+ * Send a message via Telegram Bot API with optional keyboard
+ */
+export async function sendTelegramMessage(botToken, chatId, text, parseMode = null, replyMarkup = null) {
   const body = {
     chat_id: chatId,
     text: text,
@@ -109,6 +189,10 @@ export async function sendTelegramMessage(botToken, chatId, text, parseMode = nu
 
   if (parseMode) {
     body.parse_mode = parseMode;
+  }
+
+  if (replyMarkup) {
+    body.reply_markup = replyMarkup;
   }
 
   const response = await fetch(`${TELEGRAM_API}${botToken}/sendMessage`, {
@@ -120,13 +204,24 @@ export async function sendTelegramMessage(botToken, chatId, text, parseMode = nu
   if (!response.ok) {
     const err = await response.text();
     console.error('Telegram send error:', err);
+
+    // If Markdown parsing failed, retry without parse_mode
+    if (parseMode && err.includes('parse')) {
+      body.parse_mode = undefined;
+      const retryResponse = await fetch(`${TELEGRAM_API}${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return retryResponse;
+    }
   }
 
   return response;
 }
 
 /**
- * Set webhook URL for the bot
+ * Set webhook URL for the bot (include callback_query)
  */
 export async function setTelegramWebhook(botToken, webhookUrl) {
   const response = await fetch(`${TELEGRAM_API}${botToken}/setWebhook`, {
@@ -134,7 +229,7 @@ export async function setTelegramWebhook(botToken, webhookUrl) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       url: webhookUrl,
-      allowed_updates: ['message'],
+      allowed_updates: ['message', 'callback_query'],
     }),
   });
 

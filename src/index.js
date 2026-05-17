@@ -113,7 +113,7 @@ export default {
             );
           }
 
-          const result = await processChat(message, env);
+          const result = await processChat(message, env, 'web');
 
           // Security: sanitize before sending to client
           const safeResult = sanitizeResponse(result, env);
