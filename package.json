@@ -1,0 +1,13 @@
+{
+  "name": "warroom",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Matt's War Room — AI Task Triage Chat",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.68.0"
+  }
+}

@@ -1,0 +1,11 @@
+name = "warroom"
+main = "src/index.js"
+compatibility_date = "2025-05-07"
+
+[assets]
+directory = "./public"
+
+# Cron Triggers — auto-reminders via Telegram
+# Times are in UTC: 0:00 UTC = 7:00 VN, 6:00 UTC = 13:00 VN, 15:00 UTC = 22:00 VN
+[triggers]
+crons = ["0 0 * * *", "0 6 * * *", "0 15 * * *"]
