@@ -5,7 +5,11 @@ compatibility_date = "2025-05-07"
 [assets]
 directory = "./public"
 
-# Cron Triggers — auto-reminders via Telegram
-# Times are in UTC: 0:00 UTC = 7:00 VN, 6:00 UTC = 13:00 VN, 15:00 UTC = 22:00 VN
+# Cron Triggers — auto-reminders via Telegram (VN = UTC+7)
+# 1. 10:30 VN T2-T5 (Office morning)
+# 2. 09:30 VN T6-CN (WFH/Weekend morning)  — T6=WFH brief, T7-CN=weekly review
+# 3. 13:30 VN T2-T6 (Afternoon check)
+# 4. 23:00 VN T2-T6 (Power Block)
+# 5. 20:00 VN T7-CN (Weekend evening prep)
 [triggers]
-crons = ["0 0 * * *", "0 6 * * *", "0 15 * * *"]
+crons = ["30 3 * * 1-4", "30 2 * * 5-7", "30 6 * * 1-5", "0 16 * * 1-5", "0 13 * * 6-7"]

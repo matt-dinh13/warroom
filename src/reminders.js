@@ -1,39 +1,57 @@
-// Cron-based reminders — runs on schedule, sends to Telegram
+// Cron-based reminders — day-aware schedule, sends to Telegram
+//
+// Schedule (VN timezone):
+//   T2-T5 (Office): 10:30 morning, 13:30 afternoon, 23:00 power block
+//   T6 (WFH):       09:30 morning, 13:30 afternoon, 23:00 power block
+//   T7-CN (Weekend): 09:30 weekly review, 20:00 prep tuần mới
 
 import { queryTasks } from './notion.js';
 import { sendTelegramMessage } from './telegram.js';
 
 /**
  * Handle scheduled cron event
- * @param {ScheduledEvent} event - Cloudflare cron event
- * @param {object} env - Cloudflare env
  */
 export async function handleScheduled(event, env) {
-  // Vietnam = UTC+7
   const now = new Date();
-  const vnHour = (now.getUTCHours() + 7) % 24;
+  const vnDate = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  const vnHour = vnDate.getUTCHours();
+  const vnMinute = vnDate.getUTCMinutes();
+  const dayNum = vnDate.getUTCDay(); // 0=CN, 1=T2... 5=T6, 6=T7
+
+  const isWeekend = dayNum === 0 || dayNum === 6;
+  const isFriday = dayNum === 5;
+  const isMorning = vnHour < 12;
+  const isAfternoon = vnHour >= 12 && vnHour < 18;
 
   try {
-    if (vnHour === 7) {
-      await sendMorningBriefing(env);
-    } else if (vnHour === 13) {
+    if (isWeekend) {
+      // Weekend: 9:30 = weekly review, 20:00 = prep
+      if (isMorning) {
+        await sendWeekendReview(env, dayNum);
+      } else {
+        await sendWeekendPrep(env);
+      }
+    } else if (isMorning) {
+      // Weekday morning: 10:30 (Office) or 9:30 (WFH Friday)
+      await sendMorningBriefing(env, isFriday);
+    } else if (isAfternoon) {
+      // Weekday afternoon: 13:30
       await sendAfternoonCheck(env);
-    } else if (vnHour === 22) {
-      await sendEveningWrapup(env);
     } else {
-      // Fallback: if triggered manually or at unexpected time, send morning briefing
-      await sendMorningBriefing(env);
+      // Weekday evening: 23:00 = Power Block
+      await sendPowerBlockReminder(env);
     }
   } catch (err) {
     console.error('Cron error:', err);
   }
 }
 
+// ─── Weekday Messages ────────────────────────────────
+
 /**
- * 7:00 AM — Morning Briefing
- * "Chào Matt! Đây là plan hôm nay."
+ * 10:30 (T2-T5) / 9:30 (T6) — Morning Briefing
  */
-async function sendMorningBriefing(env) {
+async function sendMorningBriefing(env, isFriday) {
   const tasks = await queryTasks('today', env);
   const overdue = await queryTasks('overdue', env);
 
@@ -42,13 +60,10 @@ async function sendMorningBriefing(env) {
   const dayNames = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
   const day = `${dayNames[vnDate.getUTCDay()]} ${vnDate.getUTCDate()}/${vnDate.getUTCMonth() + 1}`;
 
-  const dayNum = vnDate.getUTCDay();
-  const isFriday = dayNum === 5;
-  const isWeekend = dayNum === 0 || dayNum === 6;
-  const dayType = isWeekend ? '🏠 Weekend' : isFriday ? '🏠 WFH' : '🏢 Office';
-  const capacity = isWeekend ? 120 : isFriday ? 420 : 330;
+  const dayType = isFriday ? '🏠 WFH' : '🏢 Office';
+  const capacity = isFriday ? 420 : 330;
 
-  let msg = `☀️ Chào buổi sáng Matt! (${day} — ${dayType})\n\n`;
+  let msg = `☀️ Morning Briefing — ${day} (${dayType})\n\n`;
 
   if (overdue.length > 0) {
     msg += `⚠️ ${overdue.length} task QUÁ HẠN:\n`;
@@ -59,47 +74,36 @@ async function sendMorningBriefing(env) {
   }
 
   if (tasks.length > 0) {
-    // Sort by urgency
     const urgencyOrder = { '🔴 Fire': 0, '🟡 Important': 1, '🟢 Wait': 2, '⚪ Someday': 3 };
-    tasks.sort((a, b) => {
-      const ua = urgencyOrder[a.urgency] ?? 9;
-      const ub = urgencyOrder[b.urgency] ?? 9;
-      return ua - ub;
-    });
+    tasks.sort((a, b) => (urgencyOrder[a.urgency] ?? 9) - (urgencyOrder[b.urgency] ?? 9));
 
-    const top3 = tasks.slice(0, 3);
+    const top3 = tasks.filter(t => t.urgency !== '⚪ Someday').slice(0, 3);
     const totalEst = top3.reduce((sum, t) => sum + (t.estimate || 0), 0);
+    const loadPct = Math.round((totalEst / capacity) * 100);
 
     msg += `📋 Top 3 hôm nay:\n`;
     top3.forEach((t, i) => {
-      const urg = t.urgency || t.priority || '';
       const est = t.estimate ? `${t.estimate}p` : '?p';
-      msg += `${i + 1}. ${urg} [${t.project}] ${t.title} — ${est}\n`;
+      const block = t.block ? ` ${t.block}` : '';
+      msg += `${i + 1}. ${t.urgency || ''} [${t.project}] ${t.title} — ${est}${block}\n`;
     });
 
-    const loadPct = Math.round((totalEst / capacity) * 100);
-    msg += `\n📊 Load: ${totalEst}/${capacity} phút (${loadPct}%)`;
-
-    if (tasks.length > 3) {
-      msg += `\n📦 +${tasks.length - 3} task khác trong queue`;
-    }
+    msg += `\n📊 Load: ${totalEst}/${capacity}p (${loadPct}%)`;
+    if (loadPct > 100) msg += ' 🔴 OVERLOAD!';
+    if (tasks.length > 3) msg += `\n📦 +${tasks.length - 3} task khác`;
   } else {
     msg += '📭 Không có task active. Free day! 🎉';
   }
-
-  msg += '\n\n💡 Gõ /plan để xem chi tiết.';
 
   await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID, msg);
 }
 
 /**
- * 1:00 PM — Afternoon Check
- * Quick reminder about remaining tasks
+ * 13:30 T2-T6 — Afternoon Check
  */
 async function sendAfternoonCheck(env) {
   const tasks = await queryTasks('today', env);
-
-  if (tasks.length === 0) return; // Don't bother if no tasks
+  if (tasks.length === 0) return;
 
   const inProgress = tasks.filter(t => t.status === 'In progress');
   const todo = tasks.filter(t => t.status === 'To do');
@@ -108,46 +112,118 @@ async function sendAfternoonCheck(env) {
 
   if (inProgress.length > 0) {
     msg += `🔄 Đang làm:\n`;
-    inProgress.forEach(t => {
-      msg += `  • [${t.project}] ${t.title}\n`;
-    });
+    inProgress.forEach(t => { msg += `  • [${t.project}] ${t.title}\n`; });
     msg += '\n';
   }
 
   msg += `📋 Còn ${todo.length} task To Do.`;
-
-  if (todo.length > 5) {
-    msg += ` ⚠️ Nhiều quá — cân nhắc DEFER/DROP!`;
-  }
+  if (todo.length > 5) msg += ` ⚠️ Nhiều quá — DEFER/DROP!`;
 
   await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID, msg);
 }
 
 /**
- * 10:00 PM — Evening Wrap-up
- * Summary of what's left, reminder to prepare for tomorrow
+ * 23:00 T2-T6 — Power Block Reminder
  */
-async function sendEveningWrapup(env) {
+async function sendPowerBlockReminder(env) {
   const tasks = await queryTasks('today', env);
+  const pbTasks = tasks.filter(t => t.block === '🌙 Power Block' && t.status !== 'Completed');
+  const lowEnergy = tasks.filter(t => t.energy === '😴 Low' && t.status !== 'Completed');
+  const candidates = pbTasks.length > 0 ? pbTasks : lowEnergy;
+
+  let msg = `⚡ Power Block — 23:00-01:00\n\n`;
+
+  if (candidates.length > 0) {
+    msg += `🎯 Suggest:\n`;
+    candidates.slice(0, 2).forEach((t, i) => {
+      const est = t.estimate ? `${t.estimate}p` : '?p';
+      msg += `${i + 1}. [${t.project}] ${t.title} — ${est}\n`;
+    });
+    msg += '\n💡 Pick 1 task max. Đừng overdo.';
+  } else {
+    msg += '📭 Không có task Power Block. Nghỉ hoặc xem /backlog.';
+  }
+
+  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID, msg);
+}
+
+// ─── Weekend Messages ────────────────────────────────
+
+/**
+ * 9:30 T7+CN — Weekend Review
+ */
+async function sendWeekendReview(env, dayNum) {
+  const tasks = await queryTasks('all_active', env);
   const overdue = await queryTasks('overdue', env);
+  const backlog = await queryTasks('backlog', env);
 
-  if (tasks.length === 0 && overdue.length === 0) return;
+  const dayName = dayNum === 6 ? 'Thứ 7' : 'Chủ Nhật';
 
-  let msg = `🌙 Evening Wrap-up:\n\n`;
+  let msg = `☀️ Weekend Review — ${dayName}\n\n`;
+
+  // Overdue summary
+  if (overdue.length > 0) {
+    msg += `⚠️ ${overdue.length} task quá hạn cần xử lý:\n`;
+    overdue.slice(0, 5).forEach(t => {
+      msg += `  🔴 [${t.project}] ${t.title}\n`;
+    });
+    msg += '\n';
+  }
+
+  // Active tasks summary by project
+  const byProject = {};
+  tasks.filter(t => t.urgency !== '⚪ Someday').forEach(t => {
+    const p = t.project || '?';
+    byProject[p] = (byProject[p] || 0) + 1;
+  });
+
+  const totalActive = tasks.filter(t => t.urgency !== '⚪ Someday').length;
+  msg += `📊 Active: ${totalActive} tasks\n`;
+  for (const [proj, count] of Object.entries(byProject)) {
+    msg += `  📂 ${proj}: ${count}\n`;
+  }
+
+  // Backlog tease
+  if (backlog.length > 0) {
+    msg += `\n💡 ${backlog.length} ý tưởng trong Backlog — /backlog để xem.`;
+  }
+
+  msg += '\n\n🎮 Enjoy weekend! Gõ /plan nếu muốn làm gì đó.';
+
+  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID, msg);
+}
+
+/**
+ * 20:00 T7+CN — Weekend Evening Prep
+ */
+async function sendWeekendPrep(env) {
+  const overdue = await queryTasks('overdue', env);
+  const tasks = await queryTasks('today', env);
+
+  const now = new Date();
+  const vnDate = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  const isSunday = vnDate.getUTCDay() === 0;
+
+  let msg = `🌙 Weekend Wrapup — ${isSunday ? 'Prep T2' : 'Enjoy!'}\n\n`;
 
   if (overdue.length > 0) {
-    msg += `⚠️ ${overdue.length} task quá hạn — xử lý sáng mai!\n`;
+    msg += `⚠️ ${overdue.length} task quá hạn carry over:\n`;
+    overdue.slice(0, 3).forEach(t => {
+      msg += `  • [${t.project}] ${t.title}\n`;
+    });
+    msg += '\n';
   }
 
   const remaining = tasks.filter(t => t.status !== 'Completed');
   if (remaining.length > 0) {
-    msg += `📋 ${remaining.length} task active carry over sang ngày mai.\n`;
-    remaining.slice(0, 3).forEach(t => {
-      msg += `  • [${t.project}] ${t.title}\n`;
-    });
+    msg += `📋 ${remaining.length} task active cho tuần tới.\n`;
   }
 
-  msg += '\n🎮 Game time! Nghỉ ngơi đi Matt. 21:00-23:00 = sacred.';
+  if (isSunday) {
+    msg += '\n💡 Sunday prep: review overdue + plan T2 sáng mai.';
+  }
+
+  msg += '\n🎮 Game time! 21:00-23:00 = sacred.';
 
   await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID, msg);
 }
