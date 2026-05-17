@@ -37,8 +37,32 @@ function sanitizeError(errMessage, env) {
   return msg;
 }
 
+// ─── Rate Limiting (in-memory, per-isolate) ───────────────
+const rateLimitMap = new Map();
+const RATE_LIMIT_MAX = 30; // requests per window
+const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+  if (!entry || now - entry.start > RATE_LIMIT_WINDOW) {
+    rateLimitMap.set(ip, { start: now, count: 1 });
+    return true;
+  }
+  entry.count++;
+  return entry.count <= RATE_LIMIT_MAX;
+}
+
 export default {
   async fetch(request, env, ctx) {
+    // Rate limiting
+    const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
+    if (!checkRateLimit(clientIP)) {
+      return new Response(
+        JSON.stringify({ error: 'Rate limit exceeded. Thử lại sau 1 phút.' }),
+        { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '60' } }
+      );
+    }
     const url = new URL(request.url);
     const path = url.pathname;
 
@@ -60,7 +84,7 @@ export default {
         // POST /api/auth — Login
         if (path === '/api/auth' && request.method === 'POST') {
           const body = await request.json();
-          const response = handleLogin(body.password || '', env);
+          const response = await handleLogin(body.password || '', env);
           // Add CORS headers to auth response
           const newHeaders = new Headers(response.headers);
           Object.entries(corsHeaders).forEach(([k, v]) => newHeaders.set(k, v));
@@ -72,7 +96,7 @@ export default {
 
         // POST /api/chat — Main chat endpoint (requires auth)
         if (path === '/api/chat' && request.method === 'POST') {
-          if (!isAuthenticated(request, env)) {
+          if (!(await isAuthenticated(request, env))) {
             return new Response(
               JSON.stringify({ error: 'Chưa đăng nhập' }),
               { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -106,7 +130,7 @@ export default {
             JSON.stringify({
               status: 'ok',
               timestamp: new Date().toISOString(),
-              version: '1.1.0',
+              version: '2.0.0',
               telegram: !!env.TELEGRAM_BOT_TOKEN,
               cron: true,
             }),
@@ -122,7 +146,7 @@ export default {
 
         // POST /api/setup-telegram — Set webhook URL (requires auth)
         if (path === '/api/setup-telegram' && request.method === 'POST') {
-          if (!isAuthenticated(request, env)) {
+          if (!(await isAuthenticated(request, env))) {
             return new Response(
               JSON.stringify({ error: 'Unauthorized' }),
               { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

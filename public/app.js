@@ -16,8 +16,10 @@ const chatSubmit = $('#chat-submit');
 const chatMessages = $('#chat-messages');
 const headerTime = $('#header-time');
 
-// ─── State ────────────────────────────────────
+// ─── State ────────────────────────────────────────
 let isProcessing = false;
+const HISTORY_KEY = 'warroom_history';
+const MAX_HISTORY = 50;
 
 // ─── Init ──────────────────────────────────────
 function init() {
@@ -27,6 +29,9 @@ function init() {
   // Update clock
   updateClock();
   setInterval(updateClock, 1000);
+
+  // Restore chat history
+  restoreHistory();
 
   // Auth form
   authForm.addEventListener('submit', handleLogin);
@@ -196,25 +201,51 @@ async function handleChat(e) {
 }
 
 // ─── Message Rendering ─────────────────────────
-function addMessage(text, type) {
+function addMessage(text, type, time = null, save = true) {
   const msg = document.createElement('div');
   msg.className = `message ${type}`;
 
-  const now = new Date();
-  const time = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-
+  const displayTime = time || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
   const avatar = type === 'user' ? '👤' : '🤖';
 
   msg.innerHTML = `
     <div class="message-avatar">${avatar}</div>
     <div class="message-content">
       <p>${escapeHtml(text)}</p>
-      <span class="msg-time">${time}</span>
+      <span class="msg-time">${displayTime}</span>
     </div>
   `;
 
   chatMessages.appendChild(msg);
   scrollToBottom();
+
+  // Save to localStorage
+  if (save) saveToHistory(text, type, displayTime);
+}
+
+function saveToHistory(text, type, time) {
+  try {
+    const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    history.push({ text, type, time });
+    // Keep only last MAX_HISTORY messages
+    while (history.length > MAX_HISTORY) history.shift();
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  } catch {}
+}
+
+function restoreHistory() {
+  try {
+    const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    if (history.length === 0) return;
+    history.forEach(({ text, type, time }) => {
+      addMessage(text, type, time, false); // false = don't re-save
+    });
+  } catch {}
+}
+
+function clearHistory() {
+  localStorage.removeItem(HISTORY_KEY);
+  chatMessages.innerHTML = '';
 }
 
 function addTypingIndicator() {

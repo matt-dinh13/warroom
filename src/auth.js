@@ -1,28 +1,40 @@
-// Password gate middleware — simple cookie-based auth
+// Password gate middleware — SHA-256 hash + secure cookies
 
 const COOKIE_NAME = 'warroom_auth';
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 /**
+ * Hash password using SHA-256 (Web Crypto API)
+ */
+async function hashPassword(password) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password + '_warroom_salt_2026');
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return 'wrm_' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
  * Check if request is authenticated
  */
-export function isAuthenticated(request, env) {
+export async function isAuthenticated(request, env) {
   const cookieHeader = request.headers.get('Cookie') || '';
   const cookies = parseCookies(cookieHeader);
-  return cookies[COOKIE_NAME] === hashPassword(env.APP_PASSWORD);
+  const expectedHash = await hashPassword(env.APP_PASSWORD);
+  return cookies[COOKIE_NAME] === expectedHash;
 }
 
 /**
  * Handle login attempt
  */
-export function handleLogin(password, env) {
+export async function handleLogin(password, env) {
   if (password === env.APP_PASSWORD) {
-    const hash = hashPassword(password);
+    const hash = await hashPassword(password);
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        'Set-Cookie': `${COOKIE_NAME}=${hash}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE}`,
+        'Set-Cookie': `${COOKIE_NAME}=${hash}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE}`,
       },
     });
   }
@@ -31,19 +43,6 @@ export function handleLogin(password, env) {
     status: 401,
     headers: { 'Content-Type': 'application/json' },
   });
-}
-
-/**
- * Simple hash for password (not crypto-grade, just for gate)
- */
-function hashPassword(password) {
-  let hash = 0;
-  for (let i = 0; i < password.length; i++) {
-    const char = password.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32-bit integer
-  }
-  return 'wrm_' + Math.abs(hash).toString(36);
 }
 
 /**

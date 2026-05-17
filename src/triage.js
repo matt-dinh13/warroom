@@ -11,8 +11,24 @@ import { SYSTEM_PROMPT } from './prompts.js';
  * @returns {Promise<object>} { response_text, intent, ... }
  */
 export async function processChat(userMessage, env) {
+  // Step 0: Inject datetime context for AI
+  const now = new Date();
+  const vnDate = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  const dayNames = ['Chủ Nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+  const dayNum = vnDate.getUTCDay();
+  const isFriday = dayNum === 5;
+  const isWeekend = dayNum === 0 || dayNum === 6;
+  const dayType = isWeekend ? 'Weekend' : isFriday ? 'WFH' : 'Office';
+  const capacity = isWeekend ? 120 : isFriday ? 420 : 330;
+  const vnHour = vnDate.getUTCHours();
+  const block = vnHour < 12 ? '☀️ AM' : vnHour < 18 ? '🌤️ PM' : '🌙 Evening';
+
+  const dateContext = `[Context: ${dayNames[dayNum]} ${vnDate.getUTCDate()}/${vnDate.getUTCMonth() + 1}/${vnDate.getUTCFullYear()}, ${vnHour}:${String(vnDate.getUTCMinutes()).padStart(2, '0')}, ${dayType}, capacity ${capacity}p, current block: ${block}]`;
+
+  const enrichedMessage = `${dateContext}\n${userMessage}`;
+
   // Step 1: Call AI to parse intent + extract data
-  const aiResult = await callMiniMax(SYSTEM_PROMPT, userMessage, env.MINIMAX_API_KEY);
+  const aiResult = await callMiniMax(SYSTEM_PROMPT, enrichedMessage, env.MINIMAX_API_KEY);
 
   // Step 2: Execute Notion action based on AI response
   let notionResult = null;
@@ -72,12 +88,40 @@ export async function processChat(userMessage, env) {
 
 // ─── Response Builders ───────────────────────────────────────
 
+function getVNDayInfo() {
+  const now = new Date();
+  const vnDate = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  const dayNum = vnDate.getUTCDay();
+  const isFriday = dayNum === 5;
+  const isWeekend = dayNum === 0 || dayNum === 6;
+  return {
+    capacity: isWeekend ? 120 : isFriday ? 420 : 330,
+    dayType: isWeekend ? '🏠 Weekend' : isFriday ? '🏠 WFH' : '🏢 Office',
+  };
+}
+
+function formatTask(t, index) {
+  const nums = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
+  const num = nums[index] || `${index + 1}.`;
+  const est = t.estimate ? `${t.estimate}p` : '?p';
+  const block = t.block ? ` · ${t.block}` : '';
+  const deadline = t.due_date ? ` · 📅 ${t.due_date}` : '';
+  const urg = t.urgency || '';
+  return `${num} ${urg} ${t.title}\n   📂 ${t.project || '?'} · ⏱ ${est}${block}${deadline}`;
+}
+
+function buildLoadBar(pct) {
+  const filled = Math.min(Math.round(pct / 10), 10);
+  const empty = 10 - filled;
+  const icon = pct > 100 ? '🔴' : pct > 80 ? '🟡' : '🟢';
+  return `${icon} ${'█'.repeat(filled)}${'░'.repeat(empty)} ${pct}%`;
+}
+
 function buildTriageResponse(tasks) {
   if (!tasks.length) {
-    return '📭 Không có task nào active. Chill đi Matt! 🎮';
+    return '📭 Không có task nào active.\nChill đi Matt! 🎮';
   }
 
-  // Sort: Fire first, then Important, then by due date
   const urgencyOrder = { '🔴 Fire': 0, '🟡 Important': 1, '🟢 Wait': 2, '⚪ Someday': 3 };
   tasks.sort((a, b) => {
     const ua = urgencyOrder[a.urgency] ?? 9;
@@ -86,34 +130,22 @@ function buildTriageResponse(tasks) {
     return (a.due_date || '9999').localeCompare(b.due_date || '9999');
   });
 
-  // Take top 3
-  const top3 = tasks.slice(0, 3);
+  const top3 = tasks.filter(t => t.urgency !== '⚪ Someday').slice(0, 3);
   const totalEstimate = top3.reduce((sum, t) => sum + (t.estimate || 0), 0);
   const totalAll = tasks.reduce((sum, t) => sum + (t.estimate || 0), 0);
+  const { capacity, dayType } = getVNDayInfo();
 
-  // Detect day type (simple: weekday check)
-  const day = new Date().getDay();
-  const isFriday = day === 5;
-  const isWeekend = day === 0 || day === 6;
-  const capacity = isWeekend ? 120 : isFriday ? 420 : 330; // WFH Friday, Office other days
-  const dayType = isWeekend ? '🏠 Weekend' : isFriday ? '🏠 WFH' : '🏢 Office';
-
-  let response = `📋 Plan hôm nay (${dayType} — ${capacity} phút):\n\n`;
+  let response = `📋 Plan hôm nay (${dayType} — ${capacity}p)\n${'─'.repeat(24)}\n\n`;
 
   top3.forEach((t, i) => {
-    const est = t.estimate ? `${t.estimate} phút` : '? phút';
-    const block = t.block || '';
-    const urg = t.urgency || t.priority || '';
-    response += `${i + 1}. ${urg} [${t.project}] ${t.title} — ${est} ${block}\n`;
+    response += formatTask(t, i) + '\n\n';
   });
 
   const loadPct = Math.round((totalEstimate / capacity) * 100);
-  const loadStatus = loadPct > 100 ? '🔴 OVERLOAD' : loadPct > 80 ? '🟡 Heavy' : '✅ OK';
-
-  response += `\n📊 Top 3 Load: ${totalEstimate}/${capacity} phút (${loadPct}%) ${loadStatus}`;
+  response += `${buildLoadBar(loadPct)}\n⏱ Top 3: ${totalEstimate}/${capacity}p`;
 
   if (tasks.length > 3) {
-    response += `\n📦 Còn ${tasks.length - 3} task khác trong queue (tổng ${totalAll} phút)`;
+    response += `\n📦 +${tasks.length - 3} task khác (tổng ${totalAll}p)`;
   }
 
   return response;
@@ -121,72 +153,68 @@ function buildTriageResponse(tasks) {
 
 function buildOverdueResponse(tasks) {
   if (!tasks.length) {
-    return '✅ Không có task quá hạn. Good job Matt! 💪';
+    return '✅ Không có task quá hạn.\nGood job Matt! 💪';
   }
 
-  let response = `⚠️ ${tasks.length} task quá hạn:\n\n`;
+  let response = `⚠️ ${tasks.length} task quá hạn\n${'─'.repeat(24)}\n\n`;
   tasks.forEach((t, i) => {
-    response += `${i + 1}. ${t.urgency} [${t.project}] ${t.title} — 📅 ${t.due_date || 'no date'}\n`;
+    response += formatTask(t, i) + '\n\n';
   });
-  response += '\n💡 Suggest: Reschedule hoặc Drop task không còn relevant.';
-
+  response += '💡 Reschedule hoặc gõ "done [tên]" để clear.';
   return response;
 }
 
 function buildLoadCheckResponse(tasks) {
   const totalEstimate = tasks.reduce((sum, t) => sum + (t.estimate || 0), 0);
   const taskCount = tasks.length;
+  const { capacity } = getVNDayInfo();
+  const weeklyCapacity = capacity * 5 + 120 * 5;
 
-  const day = new Date().getDay();
-  const isFriday = day === 5;
-  const dailyCapacity = isFriday ? 420 : 330;
-  const weeklyCapacity = dailyCapacity * 5 + 120 * 5; // include power blocks
-
-  let response = `📊 Load Check:\n\n`;
-  response += `📌 Active tasks: ${taskCount}\n`;
-  response += `⏱️ Tổng estimate: ${totalEstimate} phút (~${Math.round(totalEstimate / 60)}h)\n`;
-  response += `📅 Weekly capacity: ${weeklyCapacity} phút (~${Math.round(weeklyCapacity / 60)}h)\n`;
+  let response = `📊 Load Check\n${'─'.repeat(24)}\n\n`;
+  response += `📌 Active: ${taskCount} tasks\n`;
+  response += `⏱ Tổng: ${totalEstimate}p (~${Math.round(totalEstimate / 60)}h)\n`;
+  response += `📅 Weekly: ${weeklyCapacity}p (~${Math.round(weeklyCapacity / 60)}h)\n\n`;
 
   const loadPct = Math.round((totalEstimate / weeklyCapacity) * 100);
+  response += buildLoadBar(loadPct);
 
   if (loadPct > 100) {
-    response += `\n🔴 OVERLOAD ${loadPct}%! Cần DROP hoặc DEFER ${Math.round((totalEstimate - weeklyCapacity) / 60)}h task.`;
-
-    // Suggest tasks to drop (lowest urgency first)
+    response += `\n\n🔴 OVERLOAD! Cần DROP ~${Math.round((totalEstimate - weeklyCapacity) / 60)}h.`;
     const droppable = tasks
       .filter(t => t.urgency === '⚪ Someday' || t.urgency === '🟢 Wait')
       .slice(0, 3);
-
     if (droppable.length) {
-      response += '\n\n💡 Suggest DROP/DEFER:\n';
+      response += '\n\n💡 Suggest DROP:\n';
       droppable.forEach((t) => {
-        response += `  • [${t.project}] ${t.title} (${t.urgency})\n`;
+        response += `  • [${t.project}] ${t.title}\n`;
       });
     }
   } else if (loadPct > 80) {
-    response += `\n🟡 Heavy load (${loadPct}%). Cẩn thận, đừng nhận thêm task.`;
+    response += `\n\n🟡 Heavy — đừng nhận thêm task.`;
   } else {
-    response += `\n✅ Load OK (${loadPct}%). Còn room để nhận task mới.`;
+    response += `\n\n✅ OK — còn room.`;
   }
 
   return response;
 }
 
 function buildReportResponse(tasks) {
-  // In existing DB, "Completed" covers both done & dropped
   const completed = tasks.filter(t => t.status === 'Completed');
   const totalTime = completed.reduce((sum, t) => sum + (t.estimate || 0), 0);
 
-  let response = `📊 Weekly Report:\n\n`;
+  let response = `📊 Weekly Report\n${'─'.repeat(24)}\n\n`;
   response += `✅ Completed: ${completed.length} tasks (~${Math.round(totalTime / 60)}h)\n`;
 
   if (completed.length) {
-    response += '\nCompleted:\n';
-    completed.slice(0, 15).forEach((t) => {
+    response += '\n';
+    completed.slice(0, 10).forEach((t) => {
       response += `  ✅ [${t.project}] ${t.title}\n`;
     });
+    if (completed.length > 10) {
+      response += `  ... +${completed.length - 10} nữa`;
+    }
   } else {
-    response += '\nChưa có task nào completed tuần này.';
+    response += '\nChưa có task completed tuần này.';
   }
 
   return response;
@@ -194,12 +222,11 @@ function buildReportResponse(tasks) {
 
 function buildBacklogResponse(tasks) {
   if (!tasks.length) {
-    return '📭 Backlog trống. Gửi link, video, hoặc ý tưởng bất kỳ để lưu vào đây!';
+    return '📭 Backlog trống.\nGửi link, video, hoặc idea để lưu!';
   }
 
-  let response = `💡 Backlog — ${tasks.length} ý tưởng đang chờ:\n\n`;
+  let response = `💡 Backlog — ${tasks.length} ý tưởng\n${'─'.repeat(24)}\n\n`;
 
-  // Group by project
   const byProject = {};
   tasks.forEach((t) => {
     const proj = t.project || 'Chưa phân loại';
@@ -208,16 +235,15 @@ function buildBacklogResponse(tasks) {
   });
 
   for (const [project, items] of Object.entries(byProject)) {
-    response += `📂 ${project}:\n`;
+    response += `📂 ${project}\n`;
     items.forEach((t, i) => {
-      const link = t.resource ? ` 🔗` : '';
-      const note = t.notes ? ` — ${t.notes.substring(0, 50)}` : '';
+      const link = t.resource ? ' 🔗' : '';
+      const note = t.notes ? ` — ${t.notes.substring(0, 40)}` : '';
       response += `  ${i + 1}. ${t.title}${link}${note}\n`;
     });
     response += '\n';
   }
 
-  response += '💡 Muốn bắt đầu cái nào? Gõ "pick [tên]" hoặc "done [tên]".';
-
+  response += '💡 Gõ "pick [tên]" hoặc "done [tên]"';
   return response;
 }
