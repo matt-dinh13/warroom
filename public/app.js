@@ -1,4 +1,5 @@
-// War Room — Frontend Chat Logic
+// War Room — Frontend Chat Logic v3.0
+// Markdown renderer + urgency colors + ADHD-optimized display
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -23,23 +24,14 @@ const MAX_HISTORY = 50;
 
 // ─── Init ──────────────────────────────────────
 function init() {
-  // Check if already authenticated (try a health check)
   checkAuth();
-  
-  // Update clock
   updateClock();
   setInterval(updateClock, 1000);
-
-  // Restore chat history
   restoreHistory();
 
-  // Auth form
   authForm.addEventListener('submit', handleLogin);
-
-  // Chat form
   chatForm.addEventListener('submit', handleChat);
 
-  // Textarea auto-resize + enter to send
   chatInput.addEventListener('input', () => {
     chatInput.style.height = 'auto';
     chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
@@ -53,7 +45,6 @@ function init() {
     }
   });
 
-  // Quick action buttons
   $$('.quick-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const action = btn.dataset.action;
@@ -71,7 +62,6 @@ async function checkAuth() {
   try {
     const res = await fetch('/api/health');
     if (res.ok) {
-      // Try chat to see if authed
       const chatRes = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -154,12 +144,10 @@ async function handleChat(e) {
   isProcessing = true;
   chatSubmit.disabled = true;
 
-  // Add user message
   addMessage(message, 'user');
   chatInput.value = '';
   chatInput.style.height = 'auto';
 
-  // Show typing indicator
   const typingEl = addTypingIndicator();
 
   try {
@@ -184,11 +172,8 @@ async function handleChat(e) {
       addMessage(data.response_text || 'Không có response', 'bot');
     }
 
-    // If needs confirmation, show follow-up
     if (data.follow_up_question) {
-      setTimeout(() => {
-        addMessage(data.follow_up_question, 'bot');
-      }, 500);
+      setTimeout(() => addMessage(data.follow_up_question, 'bot'), 500);
     }
   } catch (err) {
     removeTypingIndicator(typingEl);
@@ -200,6 +185,43 @@ async function handleChat(e) {
   }
 }
 
+// ─── Markdown Renderer ─────────────────────────
+function renderMarkdown(text) {
+  // Escape HTML first
+  let html = escapeHtml(text);
+
+  // Line breaks
+  html = html.replace(/\n/g, '<br>');
+
+  // Bold text **text** → <b>text</b>
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+
+  // Urgency pills — colorize urgency tags
+  html = html.replace(/🔴\s*(Fire|[^<\n]+)/g, '<span class="urgency-pill urgency-fire">🔴 $1</span>');
+  html = html.replace(/🟡\s*(Important|[^<\n]+)/g, '<span class="urgency-pill urgency-important">🟡 $1</span>');
+  html = html.replace(/🟢\s*(Wait|[^<\n]+)/g, '<span class="urgency-pill urgency-wait">🟢 $1</span>');
+  html = html.replace(/⚪\s*(Someday|[^<\n]+)/g, '<span class="urgency-pill urgency-someday">⚪ $1</span>');
+
+  // Load bar styling
+  html = html.replace(/(━+)(░+)\s*(\d+%)/g, '<span class="load-bar"><span class="load-filled">$1</span><span class="load-empty">$2</span> <span class="load-pct">$3</span></span>');
+
+  // XP and streak highlights
+  html = html.replace(/(\+\d+ XP!?)/g, '<span class="xp-gain">$1</span>');
+  html = html.replace(/(Streak:\s*\d+d)/g, '<span class="streak-badge">$1</span>');
+
+  // Achievement badges
+  html = html.replace(/(🏆[^<]*)/g, '<span class="achievement-unlock">$1</span>');
+
+  // Section headers (▶️, 📋, 📊, etc. at start of line)
+  html = html.replace(/(^|<br>)(▶️\s*[^<]+)/g, '$1<span class="section-header section-next">$2</span>');
+  html = html.replace(/(^|<br>)(⚡\s*[^<]+)/g, '$1<span class="section-header section-drift">$2</span>');
+
+  // Next action footer
+  html = html.replace(/(💡\s*[^<]+)/g, '<span class="next-action">$1</span>');
+
+  return html;
+}
+
 // ─── Message Rendering ─────────────────────────
 function addMessage(text, type, time = null, save = true) {
   const msg = document.createElement('div');
@@ -208,10 +230,13 @@ function addMessage(text, type, time = null, save = true) {
   const displayTime = time || new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
   const avatar = type === 'user' ? '👤' : '🤖';
 
+  // Use markdown renderer for bot messages, plain escape for user
+  const rendered = type === 'bot' ? renderMarkdown(text) : escapeHtml(text);
+
   msg.innerHTML = `
     <div class="message-avatar">${avatar}</div>
     <div class="message-content">
-      <p>${escapeHtml(text)}</p>
+      <div class="msg-body">${rendered}</div>
       <span class="msg-time">${displayTime}</span>
     </div>
   `;
@@ -219,7 +244,6 @@ function addMessage(text, type, time = null, save = true) {
   chatMessages.appendChild(msg);
   scrollToBottom();
 
-  // Save to localStorage
   if (save) saveToHistory(text, type, displayTime);
 }
 
@@ -227,7 +251,6 @@ function saveToHistory(text, type, time) {
   try {
     const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
     history.push({ text, type, time });
-    // Keep only last MAX_HISTORY messages
     while (history.length > MAX_HISTORY) history.shift();
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
   } catch {}
@@ -238,7 +261,7 @@ function restoreHistory() {
     const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
     if (history.length === 0) return;
     history.forEach(({ text, type, time }) => {
-      addMessage(text, type, time, false); // false = don't re-save
+      addMessage(text, type, time, false);
     });
   } catch {}
 }

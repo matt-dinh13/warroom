@@ -1,64 +1,41 @@
-// Triage logic — orchestrate MiniMax AI + Notion actions
-// v2.0: conversation memory, EDIT, CAPTURE_SPLIT, better formatting
-
+// Triage logic v3.0 — ADHD-optimized responses + gamification
 import { callMiniMax } from './minimax.js';
 import { createTask, queryTasks, updateTaskStatus, editTask } from './notion.js';
 import { SYSTEM_PROMPT } from './prompts.js';
+import { recordCompletion, recordBatch, getStats, buildStatsFooter, buildAchievementMsg } from './gamification.js';
 
 // ─── Conversation Memory ─────────────────────────────
-
-const MEMORY_TTL = 3600; // 1 hour
-const MAX_MEMORY = 5; // last 5 messages
+const MEMORY_TTL = 3600;
+const MAX_MEMORY = 5;
 
 async function getConversation(chatId, env) {
   if (!env.CHAT_MEMORY) return [];
   try {
-    const data = await env.CHAT_MEMORY.get(`chat:${chatId}`, 'json');
-    return data || [];
+    return (await env.CHAT_MEMORY.get(`chat:${chatId}`, 'json')) || [];
   } catch { return []; }
 }
 
 async function saveConversation(chatId, messages, env) {
   if (!env.CHAT_MEMORY) return;
   try {
-    // Keep only last MAX_MEMORY exchanges
-    const trimmed = messages.slice(-MAX_MEMORY * 2);
-    await env.CHAT_MEMORY.put(`chat:${chatId}`, JSON.stringify(trimmed), {
+    await env.CHAT_MEMORY.put(`chat:${chatId}`, JSON.stringify(messages.slice(-MAX_MEMORY * 2)), {
       expirationTtl: MEMORY_TTL,
     });
   } catch {}
 }
 
 // ─── Main Entry ──────────────────────────────────────
-
-/**
- * Process a chat message: AI parse → Notion action → response
- * @param {string} userMessage - User's chat input
- * @param {object} env - Cloudflare env bindings
- * @param {string} chatId - User identifier for conversation memory
- * @returns {Promise<object>} { response_text, intent, ... }
- */
 export async function processChat(userMessage, env, chatId = 'web') {
-  // Step 0: Inject datetime context
-  const now = new Date();
-  const vnDate = new Date(now.getTime() + 7 * 60 * 60 * 1000);
-  const dayNames = ['Chủ Nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
-  const dayNum = vnDate.getUTCDay();
-  const isFriday = dayNum === 5;
-  const isWeekend = dayNum === 0 || dayNum === 6;
-  const dayType = isWeekend ? 'Weekend' : isFriday ? 'WFH' : 'Office';
-  const capacity = isWeekend ? 120 : isFriday ? 420 : 330;
-  const vnHour = vnDate.getUTCHours();
-  const block = vnHour < 12 ? '☀️ AM' : vnHour < 18 ? '🌤️ PM' : '🌙 Evening';
+  // Inject datetime context
+  const { dateContext, dayType, capacity, vnHour } = getVNContext();
+  const enrichedMessage = `${dateContext}\n${userMessage}`;
 
-  const dateContext = `[Context: ${dayNames[dayNum]} ${vnDate.getUTCDate()}/${vnDate.getUTCMonth() + 1}/${vnDate.getUTCFullYear()}, ${vnHour}:${String(vnDate.getUTCMinutes()).padStart(2, '0')}, ${dayType}, capacity ${capacity}p, block: ${block}]`;
-
-  // Step 1: Build conversation with memory
+  // Build conversation with memory
   const history = await getConversation(chatId, env);
   const messages = [
     { role: 'system', content: SYSTEM_PROMPT },
     ...history,
-    { role: 'user', content: `${dateContext}\n${userMessage}` },
+    { role: 'user', content: enrichedMessage },
   ];
 
   const aiResult = await callMiniMax(null, null, env.MINIMAX_API_KEY, messages);
@@ -70,7 +47,7 @@ export async function processChat(userMessage, env, chatId = 'web') {
   );
   await saveConversation(chatId, history, env);
 
-  // Step 2: Execute Notion action based on AI response
+  // Execute Notion action
   let notionResult = null;
   const action = aiResult.notion_action;
 
@@ -81,85 +58,85 @@ export async function processChat(userMessage, env, chatId = 'web') {
           notionResult = await createTask(action.data, env);
           break;
 
+        case 'create_batch': {
+          const tasks = action.data?.tasks || [];
+          const created = [];
+          for (const t of tasks) {
+            await createTask(t, env);
+            created.push(t);
+          }
+          const { newAchievements, stats } = await recordBatch(chatId, env, created.length);
+          aiResult.response_text = buildBatchResponse(created, stats, newAchievements);
+          break;
+        }
+
         case 'query':
           notionResult = await queryTasks(action.data?.query_type || 'today', env);
-
-          if (aiResult.intent === 'TRIAGE' && Array.isArray(notionResult)) {
-            aiResult.response_text = buildTriageResponse(notionResult);
-          } else if (aiResult.intent === 'OVERDUE_CHECK' && Array.isArray(notionResult)) {
-            aiResult.response_text = buildOverdueResponse(notionResult);
-          } else if (aiResult.intent === 'LOAD_CHECK' && Array.isArray(notionResult)) {
-            aiResult.response_text = buildLoadCheckResponse(notionResult);
-          } else if (aiResult.intent === 'REPORT' && Array.isArray(notionResult)) {
-            aiResult.response_text = buildReportResponse(notionResult);
-          } else if (aiResult.intent === 'BACKLOG_BROWSE' && Array.isArray(notionResult)) {
-            aiResult.response_text = buildBacklogResponse(notionResult);
+          if (Array.isArray(notionResult)) {
+            const stats = await getStats(chatId, env);
+            switch (aiResult.intent) {
+              case 'TRIAGE':
+                aiResult.response_text = buildTriageResponse(notionResult, stats);
+                break;
+              case 'OVERDUE_CHECK':
+                aiResult.response_text = buildOverdueResponse(notionResult);
+                break;
+              case 'LOAD_CHECK':
+                aiResult.response_text = buildLoadCheckResponse(notionResult);
+                break;
+              case 'REPORT':
+                aiResult.response_text = buildReportResponse(notionResult, stats);
+                break;
+              case 'BACKLOG_BROWSE':
+                aiResult.response_text = buildBacklogResponse(notionResult);
+                break;
+            }
           }
           break;
 
         case 'update':
           if (action.data?.task_title && action.data?.new_status) {
-            notionResult = await updateTaskStatus(
-              action.data.task_title,
-              action.data.new_status,
-              env
-            );
+            notionResult = await updateTaskStatus(action.data.task_title, action.data.new_status, env);
             if (!notionResult) {
-              aiResult.response_text = `❌ Không tìm thấy task "${action.data.task_title}".\n💡 Gõ chính xác hơn hoặc dùng từ khóa chính.`;
+              aiResult.response_text = `❌ Không tìm thấy "${action.data.task_title}".\n💡 Gõ chính xác hơn.`;
+            } else {
+              const isFire = (notionResult.urgency || '').includes('Fire');
+              const { xpGained, newAchievements, stats } = await recordCompletion(chatId, env, isFire);
+              aiResult.response_text = buildCompletionResponse(notionResult, xpGained, newAchievements, stats);
             }
           }
           break;
 
         case 'edit':
           if (action.data?.task_title && action.data?.updates) {
-            notionResult = await editTask(
-              action.data.task_title,
-              action.data.updates,
-              env
-            );
+            notionResult = await editTask(action.data.task_title, action.data.updates, env);
             if (!notionResult) {
-              aiResult.response_text = `❌ Không tìm thấy task "${action.data.task_title}".`;
+              aiResult.response_text = `❌ Không tìm thấy "${action.data.task_title}".`;
             } else {
-              const changes = Object.entries(action.data.updates)
-                .map(([k, v]) => `  • ${k}: ${v}`)
-                .join('\n');
-              aiResult.response_text = `✏️ Đã cập nhật "${notionResult.title}":\n${changes}`;
+              const changes = Object.entries(action.data.updates).map(([k, v]) => `  • ${k}: ${v}`).join('\n');
+              aiResult.response_text = `✏️ Đã sửa "${notionResult.title}":\n${changes}\n\n💡 Gõ "plan" để xem lại.`;
             }
           }
           break;
       }
 
-      // Handle CAPTURE_SPLIT: create parent + sub-tasks
+      // Handle CAPTURE_SPLIT
       if (aiResult.intent === 'CAPTURE_SPLIT' && action.data?.parent && action.data?.subtasks) {
         const parent = await createTask(action.data.parent, env);
-        const parentTitle = action.data.parent.title;
-        const subtaskResults = [];
-
         for (const sub of action.data.subtasks) {
-          const subtask = {
+          await createTask({
             ...sub,
             project: action.data.parent.project,
             urgency: action.data.parent.urgency,
             source: action.data.parent.source,
-            context: `Sub-task of: ${parentTitle}`,
-          };
-          await createTask(subtask, env);
-          subtaskResults.push(sub);
+            context: `Sub-task of: ${action.data.parent.title}`,
+          }, env);
         }
-
-        let response = `✅ Đã tạo + chia nhỏ task:\n${'─'.repeat(24)}\n\n`;
-        response += `📌 ${parentTitle}\n`;
-        response += `   📂 ${action.data.parent.project || '?'} · ${action.data.parent.urgency || ''}\n\n`;
-        response += `📦 ${subtaskResults.length} sub-tasks:\n`;
-        subtaskResults.forEach((s, i) => {
-          const est = s.estimate ? `${s.estimate}p` : '?p';
-          response += `  ${i + 1}. ${s.title} — ${est}\n`;
-        });
-        aiResult.response_text = response;
+        aiResult.response_text = `✅ Đã tạo + chia nhỏ:\n📌 ${action.data.parent.title}\n📦 ${action.data.subtasks.length} sub-tasks\n\n💡 Gõ "plan" để xem.`;
       }
     } catch (err) {
-      console.error('Notion action error:', err);
-      aiResult.response_text += `\n\n⚠️ Lỗi Notion: ${err.message}`;
+      console.error('Notion error:', err);
+      aiResult.response_text += `\n\n⚠️ Lỗi: ${err.message}`;
     }
   }
 
@@ -172,40 +149,41 @@ export async function processChat(userMessage, env, chatId = 'web') {
   };
 }
 
-// ─── Response Builders ───────────────────────────────────────
+// ─── Context ─────────────────────────────────────────
 
-function getVNDayInfo() {
+function getVNContext() {
   const now = new Date();
   const vnDate = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  const dayNames = ['Chủ Nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
   const dayNum = vnDate.getUTCDay();
   const isFriday = dayNum === 5;
   const isWeekend = dayNum === 0 || dayNum === 6;
+  const dayType = isWeekend ? 'Weekend' : isFriday ? 'WFH' : 'Office';
+  const capacity = isWeekend ? 120 : isFriday ? 420 : 330;
+  const vnHour = vnDate.getUTCHours();
+  const block = vnHour < 12 ? '☀️ AM' : vnHour < 18 ? '🌤️ PM' : '🌙 Evening';
+  const dayIcon = isWeekend ? '🏠' : '🏢';
+
   return {
-    capacity: isWeekend ? 120 : isFriday ? 420 : 330,
-    dayType: isWeekend ? '🏠 Weekend' : isFriday ? '🏠 WFH' : '🏢 Office',
+    dateContext: `[Context: ${dayNames[dayNum]} ${vnDate.getUTCDate()}/${vnDate.getUTCMonth() + 1}/${vnDate.getUTCFullYear()}, ${vnHour}:${String(vnDate.getUTCMinutes()).padStart(2, '0')}, ${dayType}, capacity ${capacity}p, block: ${block}]`,
+    dayType, capacity, vnHour, dayIcon, isWeekend,
   };
 }
 
-function formatTask(t, index) {
-  const nums = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
-  const num = nums[index] || `${index + 1}.`;
-  const est = t.estimate ? `${t.estimate}p` : '?p';
-  const block = t.block ? ` · ${t.block}` : '';
-  const deadline = t.due_date ? ` · 📅 ${t.due_date}` : '';
-  const urg = t.urgency || '';
-  return `${num} ${urg} ${t.title}\n   📂 ${t.project || '?'} · ⏱ ${est}${block}${deadline}`;
-}
+// ─── Response Builders (ADHD-optimized: short, focused, next action) ──
 
 function buildLoadBar(pct) {
   const filled = Math.min(Math.round(pct / 10), 10);
   const empty = 10 - filled;
   const icon = pct > 100 ? '🔴' : pct > 80 ? '🟡' : '🟢';
-  return `${icon} ${'█'.repeat(filled)}${'░'.repeat(empty)} ${pct}%`;
+  return `${icon} ${'━'.repeat(filled)}${'░'.repeat(empty)} ${pct}%`;
 }
 
-function buildTriageResponse(tasks) {
+function buildTriageResponse(tasks, stats) {
+  const { capacity, dayIcon, dayType } = getVNContext();
+
   if (!tasks.length) {
-    return '📭 Không có task nào active.\nChill đi Matt! 🎮';
+    return `📭 Không có task nào active.\nChill đi Matt! 🎮${buildStatsFooter(stats)}`;
   }
 
   const urgencyOrder = { '🔴 Fire': 0, '🟡 Important': 1, '🟢 Wait': 2, '⚪ Someday': 3 };
@@ -216,136 +194,143 @@ function buildTriageResponse(tasks) {
     return (a.due_date || '9999').localeCompare(b.due_date || '9999');
   });
 
-  const top3 = tasks.filter(t => t.urgency !== '⚪ Someday').slice(0, 3);
-  const totalEstimate = top3.reduce((sum, t) => sum + (t.estimate || 0), 0);
-  const totalAll = tasks.reduce((sum, t) => sum + (t.estimate || 0), 0);
-  const { capacity, dayType } = getVNDayInfo();
+  const actionable = tasks.filter(t => t.urgency !== '⚪ Someday');
+  const next = actionable[0];
+  const totalEst = actionable.slice(0, 3).reduce((s, t) => s + (t.estimate || 0), 0);
+  const loadPct = Math.round((totalEst / capacity) * 100);
 
-  let response = `📋 Plan hôm nay (${dayType} — ${capacity}p)\n${'─'.repeat(24)}\n\n`;
+  let r = `${dayIcon} Plan hôm nay (${capacity}p)\n\n`;
 
-  top3.forEach((t, i) => {
-    response += formatTask(t, i) + '\n\n';
-  });
-
-  const loadPct = Math.round((totalEstimate / capacity) * 100);
-  response += `${buildLoadBar(loadPct)}\n⏱ Top 3: ${totalEstimate}/${capacity}p`;
-
-  if (tasks.length > 3) {
-    response += `\n📦 +${tasks.length - 3} task khác (tổng ${totalAll}p)`;
+  // NEXT task — prominent
+  if (next) {
+    const est = next.estimate ? `${next.estimate}p` : '?p';
+    const dl = next.due_date ? ` · 📅 ${next.due_date}` : '';
+    r += `▶️ TIẾP THEO:\n`;
+    r += `${next.urgency || '🟡'} ${next.title}\n`;
+    r += `📂 ${next.project || '?'} · ⏱ ${est}${dl}\n\n`;
   }
 
-  return response;
+  // Summary
+  const remaining = actionable.length - 1;
+  const queueCount = tasks.length - actionable.length;
+  if (remaining > 0) r += `📋 +${remaining} task nữa`;
+  if (queueCount > 0) r += ` | 📦 +${queueCount} backlog`;
+  r += `\n${buildLoadBar(loadPct)}`;
+  r += buildStatsFooter(stats);
+  r += `\n\n💡 Gõ "xem hết" hoặc "done ${next?.title?.split(' ').slice(0, 2).join(' ') || 'task'}"`;
+
+  return r;
+}
+
+function buildCompletionResponse(task, xpGained, newAchievements, stats) {
+  const level = stats.xp >= 0 ? stats.xp : 0;
+  let r = `✅ Done: "${task.title}"\n`;
+  r += `+${xpGained} XP!`;
+  r += buildStatsFooter(stats);
+
+  if (stats.today_completed > 0) {
+    const goal = 5;
+    const pct = Math.round((stats.today_completed / goal) * 100);
+    const filled = Math.min(Math.round(stats.today_completed / goal * 10), 10);
+    r += `\n${'━'.repeat(filled)}${'░'.repeat(10 - filled)} ${stats.today_completed}/${goal} daily`;
+  }
+
+  r += buildAchievementMsg(newAchievements);
+  r += `\n\n💡 Gõ "plan" để xem task tiếp.`;
+  return r;
+}
+
+function buildBatchResponse(tasks, stats, newAchievements) {
+  let r = `✅ Đã tạo ${tasks.length} tasks:\n`;
+  tasks.forEach((t, i) => {
+    r += `  ${i + 1}. ${t.urgency || '🟡'} ${t.title} (${t.project || '?'})\n`;
+  });
+  r += buildStatsFooter(stats);
+  r += buildAchievementMsg(newAchievements);
+  r += `\n\n💡 Gõ "plan" để xem ưu tiên.`;
+  return r;
 }
 
 function buildOverdueResponse(tasks) {
-  if (!tasks.length) {
-    return '✅ Không có task quá hạn.\nGood job Matt! 💪';
-  }
+  if (!tasks.length) return '✅ Không có task quá hạn!\n💪 Good job Matt!';
 
-  let response = `⚠️ ${tasks.length} task quá hạn\n${'─'.repeat(24)}\n\n`;
-  tasks.forEach((t, i) => {
-    response += formatTask(t, i) + '\n\n';
-  });
-  response += '💡 Reschedule hoặc gõ "done [tên]" để clear.';
-  return response;
+  const next = tasks[0];
+  let r = `⚠️ ${tasks.length} task quá hạn\n\n`;
+  r += `▶️ Quan trọng nhất:\n`;
+  r += `${next.urgency || '🟡'} ${next.title}\n`;
+  r += `📂 ${next.project || '?'} · 📅 ${next.due_date || '?'}\n`;
+
+  if (tasks.length > 1) r += `\n📋 +${tasks.length - 1} task khác quá hạn`;
+  r += `\n\n💡 Gõ "done ${next.title?.split(' ').slice(0, 2).join(' ')}" hoặc "sửa deadline"`;
+  return r;
 }
 
 function buildLoadCheckResponse(tasks) {
-  const totalEstimate = tasks.reduce((sum, t) => sum + (t.estimate || 0), 0);
-  const taskCount = tasks.length;
-  const { capacity } = getVNDayInfo();
-  const weeklyCapacity = capacity * 5 + 120 * 5;
+  const totalEst = tasks.reduce((s, t) => s + (t.estimate || 0), 0);
+  const { capacity } = getVNContext();
+  const weekCap = capacity * 5 + 120 * 2;
+  const loadPct = Math.round((totalEst / weekCap) * 100);
 
-  let response = `📊 Load Check\n${'─'.repeat(24)}\n\n`;
-  response += `📌 Active: ${taskCount} tasks\n`;
-  response += `⏱ Tổng: ${totalEstimate}p (~${Math.round(totalEstimate / 60)}h)\n`;
-  response += `📅 Weekly: ${weeklyCapacity}p (~${Math.round(weeklyCapacity / 60)}h)\n\n`;
-
-  const loadPct = Math.round((totalEstimate / weeklyCapacity) * 100);
-  response += buildLoadBar(loadPct);
+  let r = `📊 Load Check\n\n`;
+  r += `📌 ${tasks.length} tasks · ⏱ ${totalEst}p (~${Math.round(totalEst / 60)}h)\n`;
+  r += `📅 Weekly: ${weekCap}p (~${Math.round(weekCap / 60)}h)\n\n`;
+  r += buildLoadBar(loadPct);
 
   if (loadPct > 100) {
-    response += `\n\n🔴 OVERLOAD! Cần DROP ~${Math.round((totalEstimate - weeklyCapacity) / 60)}h.`;
-    const droppable = tasks
-      .filter(t => t.urgency === '⚪ Someday' || t.urgency === '🟢 Wait')
-      .slice(0, 3);
+    r += `\n\n🔴 OVERLOAD! Drop ~${Math.round((totalEst - weekCap) / 60)}h.`;
+    const droppable = tasks.filter(t => t.urgency === '⚪ Someday' || t.urgency === '🟢 Wait').slice(0, 2);
     if (droppable.length) {
-      response += '\n\n💡 Suggest DROP:\n';
-      droppable.forEach((t) => {
-        response += `  • [${t.project}] ${t.title}\n`;
-      });
+      r += '\n💡 Suggest drop:\n';
+      droppable.forEach(t => { r += `  • ${t.title}\n`; });
     }
   } else if (loadPct > 80) {
-    response += `\n\n🟡 Heavy — đừng nhận thêm task.`;
+    r += `\n\n🟡 Heavy — cẩn thận!`;
   } else {
-    response += `\n\n✅ OK — còn room.`;
+    r += `\n\n✅ OK — còn room.`;
   }
-
-  return response;
+  return r;
 }
 
-function buildReportResponse(tasks) {
+function buildReportResponse(tasks, stats) {
   const completed = tasks.filter(t => t.status === 'Completed');
-  const totalTime = completed.reduce((sum, t) => sum + (t.estimate || 0), 0);
+  const totalTime = completed.reduce((s, t) => s + (t.estimate || 0), 0);
 
-  // Group by project
-  const byProject = {};
-  completed.forEach(t => {
-    const proj = t.project || '?';
-    byProject[proj] = (byProject[proj] || 0) + 1;
-  });
+  let r = `📊 Weekly Report\n\n`;
+  r += `✅ ${completed.length} tasks (~${Math.round(totalTime / 60)}h)\n`;
 
-  let response = `📊 Weekly Report\n${'─'.repeat(24)}\n\n`;
-  response += `✅ Completed: ${completed.length} tasks (~${Math.round(totalTime / 60)}h)\n`;
-
-  // Project breakdown
-  if (Object.keys(byProject).length > 0) {
-    response += '\n📂 By project:\n';
-    for (const [proj, count] of Object.entries(byProject).sort((a, b) => b[1] - a[1])) {
-      response += `  • ${proj}: ${count}\n`;
-    }
+  // By project
+  const byProj = {};
+  completed.forEach(t => { byProj[t.project || '?'] = (byProj[t.project || '?'] || 0) + 1; });
+  if (Object.keys(byProj).length) {
+    r += '\n📂 ';
+    r += Object.entries(byProj).sort((a, b) => b[1] - a[1]).map(([p, c]) => `${p}(${c})`).join(' · ');
   }
 
-  if (completed.length) {
-    response += '\n✅ Tasks:\n';
-    completed.slice(0, 10).forEach((t) => {
-      const est = t.estimate ? ` (${t.estimate}p)` : '';
-      response += `  • [${t.project}] ${t.title}${est}\n`;
-    });
-    if (completed.length > 10) {
-      response += `  ... +${completed.length - 10} nữa`;
-    }
-  } else {
-    response += '\nChưa có task completed tuần này.';
-  }
-
-  return response;
+  r += buildStatsFooter(stats);
+  r += `\n\n💡 Keep going! 💪`;
+  return r;
 }
 
 function buildBacklogResponse(tasks) {
-  if (!tasks.length) {
-    return '📭 Backlog trống.\nGửi link, video, hoặc idea để lưu!';
-  }
+  if (!tasks.length) return '📭 Backlog trống.\n💡 Gửi link/video/idea để lưu!';
 
-  let response = `💡 Backlog — ${tasks.length} ý tưởng\n${'─'.repeat(24)}\n\n`;
-
-  const byProject = {};
-  tasks.forEach((t) => {
-    const proj = t.project || 'Chưa phân loại';
-    if (!byProject[proj]) byProject[proj] = [];
-    byProject[proj].push(t);
+  let r = `💡 Backlog — ${tasks.length} items\n\n`;
+  const byProj = {};
+  tasks.forEach(t => {
+    const p = t.project || '?';
+    if (!byProj[p]) byProj[p] = [];
+    byProj[p].push(t);
   });
 
-  for (const [project, items] of Object.entries(byProject)) {
-    response += `📂 ${project}\n`;
-    items.forEach((t, i) => {
+  for (const [proj, items] of Object.entries(byProj)) {
+    r += `📂 ${proj}\n`;
+    items.slice(0, 5).forEach((t, i) => {
       const link = t.resource ? ' 🔗' : '';
-      const note = t.notes ? ` — ${t.notes.substring(0, 40)}` : '';
-      response += `  ${i + 1}. ${t.title}${link}${note}\n`;
+      r += `  ${i + 1}. ${t.title}${link}\n`;
     });
-    response += '\n';
+    if (items.length > 5) r += `  ... +${items.length - 5} nữa\n`;
+    r += '\n';
   }
-
-  response += '💡 Gõ "pick [tên]" hoặc "done [tên]"';
-  return response;
+  r += '💡 Gõ "pick [tên]" để bắt đầu.';
+  return r;
 }

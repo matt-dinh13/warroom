@@ -234,6 +234,59 @@ Conversation memory, EDIT intent, fuzzy search, CAPTURE_SPLIT, Telegram UI overh
 
 ---
 
+## 2026-05-18 — ADHD Optimization + Gamification (v3.0)
+
+### Scope
+PO-driven redesign targeting ADHD-specific pain points: drift zones, task paralysis, dopamine deficit, information overload.
+
+### Changes Made
+
+| File | Change | Impact |
+|------|--------|--------|
+| `src/gamification.js` | NEW: XP system, streak tracking, 8 achievements, 10 levels | Dopamine loop |
+| `src/prompts.js` | Added CAPTURE_BATCH, shorter response rules, next action requirement | Multi-task brain dump |
+| `src/triage.js` | Rewrite: NEXT-task-only display, gamification integration, completion rewards | Reduces overwhelm |
+| `src/reminders.js` | Rewrite: consolidated 5 crons, drift checks (10:30 + 16:30), push slot (15:30), 8AM briefing | Anti-drift |
+| `src/telegram.js` | Switch from Markdown to HTML parse mode, updated keyboards | Reliable formatting |
+| `public/app.js` | Markdown renderer: bold, urgency pills, load bar, XP animation, section headers | Rich web display |
+| `public/style.css` | Added urgency colors, XP/streak badges, achievement glow animation | Visual hierarchy |
+| `wrangler.toml` | Consolidated 12 logical crons → 5 triggers (CF free plan limit) | Infrastructure |
+
+### Technical Decisions
+
+#### D13: Cron Consolidation (12 → 5)
+- **Decision:** Use `30 3-9 * * 1-5` (fires every :30 from 10:30-16:30 VN) + internal dispatch
+- **Reason:** CF free plan limits to 5 cron triggers; previous 12 separate entries impossible
+- **Impact:** Some :30 marks fire with no action (11:30, 12:30, 14:30) — harmless, no message sent
+
+#### D14: Gamification Architecture (KV-based)
+- **Decision:** Store stats in `CHAT_MEMORY` KV with `stats:` prefix, no TTL (persistent)
+- **Reason:** Streak/XP must persist across sessions; KV is the only storage available
+- **Impact:** Stats survive forever (no auto-expire); memory msgs still expire at 1h
+
+#### D15: Telegram HTML vs Markdown
+- **Decision:** Switch to `parse_mode: HTML` with fallback
+- **Reason:** Markdown parse errors were frequent with AI-generated content; HTML is more forgiving
+- **Impact:** Use `<b>`, `<i>` tags in response text. Retry without parse_mode on failure
+
+#### D16: "NEXT Task Only" Response Pattern
+- **Decision:** Plan shows only 1 task prominently + summary counts
+- **Reason:** ADHD research: >3 options = decision paralysis. Show NEXT action clearly
+- **Impact:** Users see focused view; can type "xem hết" for full list
+
+### Verification Results
+
+| Test | Result | Notes |
+|------|--------|-------|
+| Deploy (5 cron triggers) | ✅ Pass | After fixing CF cron syntax |
+| Bold markdown rendering | ✅ Pass | **text** → `<b>text</b>` |
+| Urgency color pills (web) | ✅ Pass | 🟡 shows yellow text |
+| Plan response (web) | ✅ Pass | Clean, focused layout |
+| Check load (web) | ✅ Pass | Table + bold formatting |
+| Git push | ✅ Pass | v3.0 |
+
+---
+
 ## Template for Future Entries
 
 ```markdown

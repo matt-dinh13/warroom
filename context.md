@@ -1,7 +1,7 @@
 # ⚔️ War Room — Project Context
 
 > File này chứa đủ context để developer mới (hoặc AI agent) tiếp tục phát triển mà không cần hỏi lại.
-> Cập nhật lần cuối: 2026-05-18 (v2.1)
+> Cập nhật lần cuối: 2026-05-18 (v3.0)
 
 ---
 
@@ -11,7 +11,7 @@
 
 **Flow:** Chat input → MiniMax AI parse/triage → Notion CRUD → trả kết quả về chat.
 
-**Key UX:** AI nhớ ngữ cảnh hội thoại (5 tin nhắn), nhận biết ngày/giờ/day type, tự chia task lớn thành sub-tasks.
+**Key UX:** AI nhớ ngữ cảnh hội thoại (5 tin nhắn), nhận biết ngày/giờ/day type, tự chia task lớn thành sub-tasks. Gamification (XP/Streak/Achievements) tạo dopamine loop. Brain dump (nhiều task 1 lúc). ADHD-optimized: chỉ show 1 task tiếp theo, anti-drift reminders.
 
 ---
 
@@ -27,13 +27,14 @@ Cron (5 schedules) ─→ reminders.js ─→ Notion query ─→ Telegram messa
 
 Cloudflare Worker (src/index.js)
   ├→ Rate Limiter (30 req/min per IP)
-  ├→ src/auth.js       — SHA-256 password gate + Secure cookies
-  ├→ src/triage.js     — Orchestration + conversation memory + response builders
-  │    ├→ src/minimax.js  — MiniMax-M2.7 (multi-turn support)
-  │    ├→ src/notion.js   — Notion CRUD + fuzzy search + edit
-  │    └→ src/prompts.js  — System prompt + security rules
-  ├→ src/telegram.js   — Webhook + inline keyboard + Markdown
-  ├→ src/reminders.js  — Day-aware cron auto reminders
+  ├→ src/auth.js          — SHA-256 password gate + Secure cookies
+  ├→ src/triage.js        — Orchestration + memory + ADHD response builders
+  │    ├→ src/minimax.js    — MiniMax-M2.7 (multi-turn support)
+  │    ├→ src/notion.js     — Notion CRUD + fuzzy search + edit
+  │    ├→ src/prompts.js    — System prompt + security rules
+  │    └→ src/gamification.js — XP, Streaks, Achievements, Levels
+  ├→ src/telegram.js      — Webhook + inline keyboard + HTML parse mode
+  ├→ src/reminders.js     — Consolidated cron (5 triggers) + drift checks
   └→ Static assets (Cloudflare [assets] binding)
 ```
 
@@ -136,11 +137,12 @@ warroom/
 │   ├── triage.js           # Orchestration + KV memory + response builders
 │   ├── prompts.js          # System prompt + security rules
 │   ├── telegram.js         # Webhook + inline keyboard + Markdown
-│   └── reminders.js        # Day-aware cron auto reminders
+│   ├── reminders.js        # Consolidated cron (5 triggers) + drift checks
+│   └── gamification.js     # XP, Streaks, Achievements, Levels
 └── public/
     ├── index.html           # Chat UI (SPA)
-    ├── style.css            # Dark theme (CSS custom properties)
-    └── app.js               # Frontend logic + localStorage history
+    ├── style.css            # Dark theme + urgency pills + XP animations
+    └── app.js               # Frontend + markdown renderer + urgency colors
 ```
 
 ---
@@ -178,13 +180,15 @@ CHAT_MEMORY — 2e87de8f1a4e45d09ac79fcc88a92d86
 
 ## 9. CRON SCHEDULE
 
-| Slot | VN Time | UTC Cron | Days |
-|------|---------|----------|------|
-| Office Morning | 10:30 | `30 3 * * 1-4` | T2-T5 |
-| WFH/Weekend Morning | 09:30 | `30 2 * * 5-7` | T6-CN |
-| Afternoon Check | 13:30 | `30 6 * * 1-5` | T2-T6 |
-| Power Block | 23:00 | `0 16 * * 1-5` | T2-T6 |
-| Weekend Evening | 20:00 | `0 13 * * 6-7` | T7-CN |
+| Slot | VN Time | UTC Cron | Days | Purpose |
+|------|---------|----------|------|--------|
+| Wake-up | 08:00 | `0 1 * * 1-5` | T2-T6 | Morning briefing |
+| Work hours | :30 marks | `30 3-9 * * 1-5` | T2-T6 | Dispatches: 10:30 drift, 13:30 afternoon, 15:30 push, 16:30 drift |
+| Weekend AM | 09:30 | `30 2 * * 6` | T7 | Weekend morning |
+| Weekend PM | 20:00 | `0 13 * * 6` | T7 | Weekend evening |
+| Power Block | 23:00 | `0 16 * * 1-5` | T2-T6 | Night session |
+
+> **Note:** Consolidated from 12 logical slots to 5 cron triggers (CF free plan limit). Internal dispatch in `reminders.js` routes by VN hour/minute.
 
 ---
 
@@ -214,7 +218,8 @@ npx wrangler tail
 2. **Day type detection** — Hardcoded: Friday = WFH, others = Office, weekend = 120min.
 3. **Single user** — No multi-user support, single shared password.
 4. **KV Memory TTL** — Conversation context expires after 1 hour of inactivity.
-5. **Telegram Markdown** — Some special chars may break formatting (auto-fallback to plain text).
+5. **5 cron limit** — CF free plan. Consolidated via internal dispatch.
+6. **CN cron** — Sunday shares T7 cron trigger; dispatch handles separately.
 
 ---
 
@@ -227,3 +232,4 @@ npx wrangler tail
 | 1.2 | 2026-05-17 | Backlog feature |
 | 2.0 | 2026-05-17 | SHA-256 auth, rate limiting, datetime injection, chat history |
 | 2.1 | 2026-05-17 | Conversation memory, EDIT, fuzzy search, Telegram keyboard, CAPTURE_SPLIT |
+| 3.0 | 2026-05-18 | Gamification (XP/Streak/Achievements), CAPTURE_BATCH, ADHD response optimization, urgency colors, HTML Telegram, 8AM briefing, drift checks, push slot |

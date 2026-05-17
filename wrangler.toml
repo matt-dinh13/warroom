@@ -5,16 +5,18 @@ compatibility_date = "2025-05-07"
 [assets]
 directory = "./public"
 
-# KV namespace for conversation memory
+# KV namespace for conversation memory + gamification
 [[kv_namespaces]]
 binding = "CHAT_MEMORY"
 id = "2e87de8f1a4e45d09ac79fcc88a92d86"
 
-# Cron Triggers — auto-reminders via Telegram (VN = UTC+7)
-# 1. 10:30 VN T2-T5 (Office morning)
-# 2. 09:30 VN T6-CN (WFH/Weekend morning)
-# 3. 13:30 VN T2-T6 (Afternoon check)
-# 4. 23:00 VN T2-T6 (Power Block)
-# 5. 20:00 VN T7-CN (Weekend evening)
+# Cron Triggers — 5 max on free plan
+# Internal dispatch in reminders.js handles VN timezone mapping
 [triggers]
-crons = ["30 3 * * 1-4", "30 2 * * 5-7", "30 6 * * 1-5", "0 16 * * 1-5", "0 13 * * 6-7"]
+crons = [
+  "0 1 * * 1-5",     # 08:00 VN T2-T6 — Wake-up briefing
+  "30 3-9 * * 1-5",  # :30 marks from 10:30-16:30 VN T2-T6 — Morning/Drift/Afternoon/Push
+  "30 2 * * 6",      # 09:30 VN T7 — Weekend/WFH morning (also CN via dispatch)
+  "0 13 * * 6",      # 20:00 VN T7 — Weekend evening (also CN via dispatch)
+  "0 16 * * 1-5"     # 23:00 VN T2-T6 — Power Block
+]
