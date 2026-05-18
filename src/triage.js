@@ -51,8 +51,58 @@ export async function processChat(userMessage, env, chatId = 'web') {
   const action = aiResult.notion_action;
 
   // ─── Direct intent overrides (bypass AI's notion_action) ──────
-  // When AI returns LIST_TASKS intent, always query Notion directly
-  if (aiResult.intent === 'LIST_TASKS' || (!action && /li[eệ]t k[eê]|list\s*task|xem\s*task|task\s*ch[uư]a\s*[đd][oó]ng|task\s*[đd]ang\s*m[oở]/i.test(userMessage))) {
+
+  // TRIAGE: "plan today", "hôm nay", "ưu tiên" → query today's tasks from Notion
+  if (!action && /plan\s*today|h[oô]m nay|[uư]u ti[eê]n|today|plan$/i.test(userMessage)) {
+    try {
+      const todayTasks = await queryTasks('today', env);
+      const stats = await getStats(chatId, env);
+      aiResult.response_text = buildTriageResponse(todayTasks, stats);
+      aiResult.intent = 'TRIAGE';
+      notionResult = todayTasks;
+    } catch (err) {
+      console.error('Triage query error:', err);
+    }
+  }
+
+  // OVERDUE: "overdue", "quên", "bỏ sót" → query overdue tasks
+  if (!action && !notionResult && /overdue|qu[eê]n|b[oỏ]\s*s[oó]t|b[oỏ]\s*qu[eê]n/i.test(userMessage)) {
+    try {
+      const overdueTasks = await queryTasks('overdue', env);
+      aiResult.response_text = buildOverdueResponse(overdueTasks);
+      aiResult.intent = 'OVERDUE_CHECK';
+      notionResult = overdueTasks;
+    } catch (err) {
+      console.error('Overdue query error:', err);
+    }
+  }
+
+  // LOAD_CHECK: "check load", "overload", "quá tải"
+  if (!action && !notionResult && /check\s*load|overload|qu[aá]\s*t[aả]i/i.test(userMessage)) {
+    try {
+      const activeTasks = await queryTasks('all_active', env);
+      aiResult.response_text = buildLoadCheckResponse(activeTasks);
+      aiResult.intent = 'LOAD_CHECK';
+      notionResult = activeTasks;
+    } catch (err) {
+      console.error('Load check error:', err);
+    }
+  }
+
+  // BACKLOG: "backlog", "có gì làm không", "rảnh", "pick"
+  if (!action && !notionResult && /backlog|c[oó]\s*g[iì]\s*l[aà]m|r[aả]nh|pick|[yý]\s*t[uư][oở]ng/i.test(userMessage)) {
+    try {
+      const backlogTasks = await queryTasks('backlog', env);
+      aiResult.response_text = buildBacklogResponse(backlogTasks);
+      aiResult.intent = 'BACKLOG_BROWSE';
+      notionResult = backlogTasks;
+    } catch (err) {
+      console.error('Backlog query error:', err);
+    }
+  }
+
+  // LIST_TASKS: When AI returns LIST_TASKS intent, always query Notion directly
+  if (aiResult.intent === 'LIST_TASKS' || (!action && !notionResult && /li[eệ]t k[eê]|list\s*task|xem\s*task|task\s*ch[uư]a\s*[đd][oó]ng|task\s*[đd]ang\s*m[oở]|xem\s*h[eế]t/i.test(userMessage))) {
     try {
       const activeTasks = await queryTasks('all_active', env);
       if (!activeTasks || activeTasks.length === 0) {
@@ -412,7 +462,7 @@ function buildTriageResponse(tasks, stats) {
   const { capacity, dayIcon, dayType } = getVNContext();
 
   if (!tasks.length) {
-    return `📭 Không có task nào active.\nChill đi Matt! 🎮${buildStatsFooter(stats)}`;
+    return `📭 Không có task nào cần làm hôm nay.\nChill đi Matt! 🎮\n\n💡 Gõ "backlog" để pick ý tưởng.${buildStatsFooter(stats)}`;
   }
 
   const urgencyOrder = { '🔴 Fire': 0, '🟡 Important': 1, '🟢 Wait': 2, '⚪ Someday': 3 };
@@ -423,12 +473,12 @@ function buildTriageResponse(tasks, stats) {
     return (a.due_date || '9999').localeCompare(b.due_date || '9999');
   });
 
-  const actionable = tasks.filter(t => t.urgency !== '⚪ Someday');
-  const next = actionable[0];
-  const totalEst = actionable.slice(0, 3).reduce((s, t) => s + (t.estimate || 0), 0);
+  // All tasks returned by 'today' query are actionable (no backlog in this view)
+  const next = tasks[0];
+  const totalEst = tasks.slice(0, 3).reduce((s, t) => s + (t.estimate || 0), 0);
   const loadPct = Math.round((totalEst / capacity) * 100);
 
-  let r = `${dayIcon} Plan hôm nay (${capacity}p)\n\n`;
+  let r = `${dayIcon} Hôm nay — ${tasks.length} tasks (${capacity}p)\n\n`;
 
   // NEXT task — prominent
   if (next) {
@@ -439,14 +489,19 @@ function buildTriageResponse(tasks, stats) {
     r += `📂 ${next.project || '?'} · ⏱ ${est}${dl}\n\n`;
   }
 
-  // Summary
-  const remaining = actionable.length - 1;
-  const queueCount = tasks.length - actionable.length;
-  if (remaining > 0) r += `📋 +${remaining} task nữa`;
-  if (queueCount > 0) r += ` | 📦 +${queueCount} backlog`;
+  // Summary of remaining
+  if (tasks.length > 1) {
+    r += `📋 +${tasks.length - 1} task nữa:`;
+    tasks.slice(1, 4).forEach(t => {
+      r += `\n  • ${t.urgency || '🟡'} ${t.title}`;
+    });
+    if (tasks.length > 4) r += `\n  ... +${tasks.length - 4} nữa`;
+    r += '\n';
+  }
+
   r += `\n${buildLoadBar(loadPct)}`;
   r += buildStatsFooter(stats);
-  r += `\n\n💡 Gõ "xem hết" hoặc "done ${next?.title?.split(' ').slice(0, 2).join(' ') || 'task'}"`;
+  r += `\n\n💡 Gõ "done ${next?.title?.split(' ').slice(0, 3).join(' ') || 'task'}" hoặc "xem hết"`;
 
   return r;
 }
@@ -500,16 +555,22 @@ function buildLoadCheckResponse(tasks) {
   const weekCap = capacity * 5 + 120 * 2;
   const loadPct = Math.round((totalEst / weekCap) * 100);
 
+  // Separate overdue from upcoming
+  const today = new Date().toISOString().split('T')[0];
+  const overdue = tasks.filter(t => (t.due_date && t.due_date < today) || (t.do_date && t.do_date < today));
+  const active = tasks.filter(t => !overdue.includes(t));
+
   let r = `📊 Load Check\n\n`;
-  r += `📌 ${tasks.length} tasks · ⏱ ${totalEst}p (~${Math.round(totalEst / 60)}h)\n`;
-  r += `📅 Weekly: ${weekCap}p (~${Math.round(weekCap / 60)}h)\n\n`;
-  r += buildLoadBar(loadPct);
+  r += `📌 ${tasks.length} tasks active · ⏱ ${totalEst}p (~${Math.round(totalEst / 60)}h)\n`;
+  r += `📅 Weekly capacity: ${weekCap}p (~${Math.round(weekCap / 60)}h)\n`;
+  if (overdue.length > 0) r += `⚠️ ${overdue.length} task quá hạn!\n`;
+  r += `\n${buildLoadBar(loadPct)}`;
 
   if (loadPct > 100) {
-    r += `\n\n🔴 OVERLOAD! Drop ~${Math.round((totalEst - weekCap) / 60)}h.`;
-    const droppable = tasks.filter(t => t.urgency === '⚪ Someday' || t.urgency === '🟢 Wait').slice(0, 2);
+    r += `\n\n🔴 OVERLOAD! Cần drop ~${Math.round((totalEst - weekCap) / 60)}h.`;
+    const droppable = tasks.filter(t => t.urgency === '🟢 Wait').slice(0, 2);
     if (droppable.length) {
-      r += '\n💡 Suggest drop:\n';
+      r += '\n💡 Suggest defer/drop:\n';
       droppable.forEach(t => { r += `  • ${t.title}\n`; });
     }
   } else if (loadPct > 80) {
@@ -543,10 +604,10 @@ function buildReportResponse(tasks, stats) {
 function buildBacklogResponse(tasks) {
   if (!tasks.length) return '📭 Backlog trống.\n💡 Gửi link/video/idea để lưu!';
 
-  let r = `💡 Backlog — ${tasks.length} items\n\n`;
+  let r = `💡 Backlog — ${tasks.length} items (không deadline, pick khi rảnh)\n\n`;
   const byProj = {};
   tasks.forEach(t => {
-    const p = t.project || '?';
+    const p = t.project || 'Chưa phân loại';
     if (!byProj[p]) byProj[p] = [];
     byProj[p].push(t);
   });
@@ -560,7 +621,7 @@ function buildBacklogResponse(tasks) {
     if (items.length > 5) r += `  ... +${items.length - 5} nữa\n`;
     r += '\n';
   }
-  r += '💡 Gõ "pick [tên]" để bắt đầu.';
+  r += '💡 Gõ "pick [tên]" để chuyển thành task active.';
   return r;
 }
 

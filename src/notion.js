@@ -118,39 +118,86 @@ export async function createTask(taskData, env) {
 
 /**
  * Query tasks from Notion with filters
- * @param {string} queryType - "today" | "overdue" | "all_active" | "weekly_report" | "backlog"
+ * @param {string} queryType - "today" | "upcoming" | "overdue" | "all_active" | "weekly_report" | "backlog"
+ *
+ * Query philosophy (ADHD-optimized):
+ * - User doesn't care about To do vs In progress — only "done" vs "not done"
+ * - "today" = tasks due today or overdue (what needs attention NOW)
+ * - "upcoming" = tasks due in next 7 days (planning view)
+ * - "all_active" = everything not completed (for LIST_TASKS)
+ * - "backlog" = Someday items or no deadline (ideas, links, low priority)
  */
 export async function queryTasks(queryType, env) {
   let filter;
   const today = new Date().toISOString().split('T')[0];
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+  const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
 
   switch (queryType) {
     case 'today':
-      // Active tasks: To do + In progress
+      // Tasks that need attention TODAY:
+      // - Deadline or Do Date is today or earlier AND not completed
+      // Simple approach: just check both date fields
       filter = {
-        or: [
-          { property: 'State', status: { equals: 'To do' } },
-          { property: 'State', status: { equals: 'In progress' } },
-          { property: 'State', status: { equals: 'Pending / Wait for approved' } },
+        and: [
+          { property: 'State', status: { does_not_equal: 'Completed' } },
+          {
+            or: [
+              { property: 'Do Date', date: { on_or_before: today } },
+              { property: 'Deadline', date: { on_or_before: today } },
+            ],
+          },
+        ],
+      };
+      break;
+
+    case 'upcoming':
+      // Tasks due in the next 7 days (after today, before next week)
+      filter = {
+        and: [
+          { property: 'State', status: { does_not_equal: 'Completed' } },
+          {
+            or: [
+              {
+                and: [
+                  { property: 'Do Date', date: { after: today } },
+                  { property: 'Do Date', date: { on_or_before: nextWeek } },
+                ],
+              },
+              {
+                and: [
+                  { property: 'Deadline', date: { after: today } },
+                  { property: 'Deadline', date: { on_or_before: nextWeek } },
+                ],
+              },
+            ],
+          },
         ],
       };
       break;
 
     case 'overdue':
-      // Tasks with deadline before today and NOT completed
+      // Tasks past deadline and NOT completed
       filter = {
         and: [
-          { property: 'Deadline', date: { before: today } },
           { property: 'State', status: { does_not_equal: 'Completed' } },
+          {
+            or: [
+              { property: 'Deadline', date: { before: today } },
+              { property: 'Do Date', date: { before: today } },
+            ],
+          },
         ],
       };
       break;
 
     case 'all_active':
-      // All tasks that are not Completed
+      // All tasks not completed, excluding Someday (those go to backlog)
       filter = {
-        property: 'State',
-        status: { does_not_equal: 'Completed' },
+        and: [
+          { property: 'State', status: { does_not_equal: 'Completed' } },
+          { property: 'Urgency', select: { does_not_equal: '⚪ Someday' } },
+        ],
       };
       break;
 
@@ -166,12 +213,11 @@ export async function queryTasks(queryType, env) {
       break;
 
     case 'backlog':
-      // Backlog: Urgency = ⚪ Someday AND NOT completed AND no Deadline
+      // Backlog: Someday urgency items (simple, reliable filter)
       filter = {
         and: [
-          { property: 'Urgency', select: { equals: '⚪ Someday' } },
           { property: 'State', status: { does_not_equal: 'Completed' } },
-          { property: 'Deadline', date: { is_empty: true } },
+          { property: 'Urgency', select: { equals: '⚪ Someday' } },
         ],
       };
       break;

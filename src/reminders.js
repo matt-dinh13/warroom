@@ -64,10 +64,10 @@ async function sendMorningBriefing(env) {
   if (!chatId) return;
 
   const tasks = await queryTasks('today', env);
-  const overdue = await queryTasks('overdue', env);
   const stats = await getStats(String(chatId), env);
 
   const vnDate = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  const today = vnDate.toISOString().split('T')[0];
   const dayNames = ['Chủ Nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
   const dayNum = vnDate.getUTCDay();
   const isFriday = dayNum === 5;
@@ -76,8 +76,11 @@ async function sendMorningBriefing(env) {
 
   // Sort by urgency
   const urgencyOrder = { '🔴 Fire': 0, '🟡 Important': 1, '🟢 Wait': 2, '⚪ Someday': 9 };
-  const actionable = tasks.filter(t => t.urgency !== '⚪ Someday')
+  const actionable = tasks
     .sort((a, b) => (urgencyOrder[a.urgency] ?? 9) - (urgencyOrder[b.urgency] ?? 9));
+
+  // Separate overdue from today's tasks
+  const overdue = tasks.filter(t => (t.due_date && t.due_date < today) || (t.do_date && t.do_date < today));
 
   let msg = `☀️ Chào Matt! ${dayNames[dayNum]} ${vnDate.getUTCDate()}/${vnDate.getUTCMonth() + 1}\n`;
   msg += `${dayType} — ${capacity}p\n\n`;

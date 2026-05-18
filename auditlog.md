@@ -525,6 +525,59 @@ Additionally, `editTask()` only supported 6 fields (deadline, urgency, estimate,
 
 ---
 
+## 2026-05-18 — Query Redesign + Regex Fallbacks (v3.6)
+
+### Scope
+Redesign query logic to properly separate "today's focus" from backlog. Add regex-based fallbacks for all query intents.
+
+### Problem
+- "plan today" returned ALL active tasks (To do + In progress) regardless of deadline
+- No distinction between "needs attention now" vs "backlog/someday"
+- AI frequently returns plain text instead of JSON → server-side queries never triggered
+
+### Query Philosophy (ADHD-optimized)
+- User doesn't care about To do vs In progress — only "done" vs "not done"
+- **today** = tasks due today or overdue (what needs attention NOW)
+- **all_active** = everything not completed, excluding Someday (for LIST_TASKS)
+- **backlog** = Someday items (ideas, links, low priority)
+- **overdue** = tasks past deadline
+
+### Changes Made
+
+| File | Change |
+|------|--------|
+| `src/notion.js` | Rewrote all query filters: today (deadline ≤ today), overdue (deadline < today), all_active (not completed, not Someday), backlog (Someday only), upcoming (next 7 days) |
+| `src/triage.js` | Added regex fallbacks for TRIAGE, OVERDUE, LOAD_CHECK, BACKLOG — always query Notion directly regardless of AI JSON compliance |
+| `src/triage.js` | Updated `buildTriageResponse` — no longer filters out Someday (query already excludes them) |
+| `src/triage.js` | Updated `buildBacklogResponse` — clearer messaging |
+| `src/triage.js` | Updated `buildLoadCheckResponse` — shows overdue count |
+| `src/reminders.js` | Morning briefing uses new `today` query (no separate overdue call needed) |
+| `src/prompts.js` | Updated query_type documentation |
+
+### Technical Decisions
+
+#### D24: Simplified Notion Filters
+- **Decision:** Avoid nested `and` inside `or` — Notion API rejects 3+ levels of nesting
+- **Reason:** Complex compound filters caused 400 validation errors
+- **Impact:** Simpler filters, more reliable queries. Trade-off: backlog = only ⚪ Someday (not "no deadline + low urgency")
+
+#### D25: Regex Fallbacks for ALL Query Intents
+- **Decision:** Add regex detection for plan/overdue/load/backlog that runs BEFORE checking AI's notion_action
+- **Reason:** MiniMax returns plain text ~50% of the time for query commands — server-side must handle it
+- **Impact:** 100% reliability for all query commands regardless of AI output format
+
+### Verification Results
+
+| Test | Result | Notes |
+|------|--------|-------|
+| "plan today" | ✅ 4 tasks | Only due today + overdue (was 20+ before) |
+| "overdue" | ✅ 3 tasks | Tasks with deadline before today |
+| "check load" | ✅ 19 tasks | Active tasks excluding Someday |
+| "backlog" | ✅ 1 item | Only Someday urgency |
+| "list tasks" | ✅ 19 tasks | All non-completed, non-Someday |
+
+---
+
 ## Template for Future Entries
 
 ```markdown

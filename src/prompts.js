@@ -117,7 +117,11 @@ Nếu intent là CAPTURE → BẮT BUỘC trả notion_action với type "create
       // User: "sửa task X, stakeholders: anh Hải" → updates: { "assigned_by": "anh Hải" }
       // User: "đổi deadline task X sang 30/5" → updates: { "deadline": "2026-05-30" }
       // User: "thêm note cho task X: cần review" → updates: { "notes": "cần review" }
-      // For QUERY: "query_type": "today|overdue|all_active|weekly_report|backlog"
+      // For QUERY: "query_type": "today|upcoming|overdue|all_active|weekly_report|backlog"
+      // today = tasks due today or overdue (what needs attention NOW)
+      // upcoming = tasks due in next 7 days (planning view)
+      // all_active = everything not completed, excluding backlog
+      // backlog = Someday items or no deadline (ideas, low priority)
     }
   },
   "needs_confirmation": false,
