@@ -578,6 +578,95 @@ Redesign query logic to properly separate "today's focus" from backlog. Add rege
 
 ---
 
+## 2026-05-18 — Engine-First Architecture (v4.0)
+
+### Scope
+Major architecture redesign: commands execute instantly without AI. Added done-by-number, 2-minute rule, context switch warning, auto-defer cron.
+
+### Problem
+- Every message called MiniMax AI (5-15s latency) even for simple commands like "plan" or "done"
+- AI returned plain text ~50% of the time → required complex fallback chains
+- No quick way to mark tasks done (had to type full task name)
+- No protection against ADHD context switching
+- Tasks piled up as overdue with no auto-resolution
+
+### Architecture Change
+
+**Before (AI-first):**
+```
+User → AI parse (5-15s) → fallback regex → execute
+```
+
+**After (Engine-first):**
+```
+User → regex match? → YES → execute directly (<1s)
+                    → NO  → call AI for natural language parse (5-15s)
+```
+
+### Changes Made
+
+| File | Change | Impact |
+|------|--------|--------|
+| `src/triage.js` | Complete rewrite: Phase 1 (regex commands, instant) + Phase 2 (AI, only for capture) | ~70% messages skip AI entirely |
+| `src/triage.js` | `done 1/2/3` — mark task by number from last plan | Zero-friction completion |
+| `src/triage.js` | Last Plan Cache in KV (`lastplan:` prefix) | Enables done-by-number |
+| `src/triage.js` | 2-minute rule: quick tasks (≤5p) suggest "làm luôn" if not busy | Prevents tiny tasks from rotting in queue |
+| `src/triage.js` | Context switch warning: capture while In Progress → alert | Anti-ADHD drift |
+| `src/triage.js` | `buildResult()` helper, `buildCaptureConfirmation()`, `buildListResponse()` | Cleaner code |
+| `src/reminders.js` | Replaced `sendPowerBlockReminder` with `sendAutoDeferSummary` | Auto-defer + daily summary |
+| `src/reminders.js` | Auto-defer logic: moves undone tasks' Do Date to tomorrow | Reduces guilt/overwhelm |
+| `wrangler.toml` | Cron slot 5: `0 16` → `30 16` (23:00 → 23:30 VN) | Auto-defer timing |
+
+### Technical Decisions
+
+#### D26: Engine-First Architecture
+- **Decision:** Regex-based command detection runs FIRST; AI only called for ambiguous natural language
+- **Reason:** ~70% of user messages are fixed commands (plan, done, list, etc.) that don't need AI
+- **Impact:** Response time 5-15s → <1s for commands. API credits reduced ~70%.
+
+#### D27: Done-by-Number with KV Cache
+- **Decision:** Store last plan's task list in KV (`lastplan:{chatId}`), allow "done 1" to complete task #1
+- **Reason:** ADHD users know task is done but typing full name is friction → they don't mark it
+- **Impact:** "plan" → "done 1" flow = 2 taps, maximum dopamine
+
+#### D28: 2-Minute Rule (Conditional)
+- **Decision:** If task ≤5p AND no task In Progress → suggest "làm luôn". If busy → just capture normally.
+- **Reason:** GTD 2-minute rule works for ADHD BUT not when already focused on something else
+- **Impact:** Quick tasks get done immediately when user is free; no interruption when focused
+
+#### D29: Auto-Defer (23:30 Cron)
+- **Decision:** At 23:30, move undone tasks' Do Date to tomorrow + send daily summary
+- **Reason:** Overdue tasks create guilt → avoidance loop. Auto-defer breaks the cycle.
+- **Impact:** User wakes up with clean slate. No manual action needed.
+
+### Verification Results
+
+| Test | Result | Notes |
+|------|--------|-------|
+| "plan" (no AI) | ✅ 0.76s | 4 tasks, numbered, instant |
+| "done 1" (no AI) | ✅ 1.8s | Task completed, XP gained, achievement unlocked |
+| "done [name]" (no AI) | ✅ Pass | Fuzzy match, instant |
+| "overdue" (no AI) | ✅ Pass | 3 overdue tasks |
+| "check load" (no AI) | ✅ Pass | 19 active tasks |
+| "backlog" (no AI) | ✅ Pass | 1 Someday item |
+| "list" (no AI) | ✅ Pass | All active tasks |
+| "xoá [task]" (no AI) | ✅ Pass | Archive task |
+| "report" (no AI) | ✅ Pass | Weekly summary |
+| Natural language capture (AI) | ✅ Pass | Fallback creates task from AI text |
+| Build + Deploy | ✅ Pass | stratt.rocky13.workers.dev |
+
+### Performance Comparison
+
+| Command | Before (v3.6) | After (v4.0) | Improvement |
+|---------|---------------|--------------|-------------|
+| plan | 5-15s | 0.76s | **10-20x faster** |
+| done [task] | 5-15s | 1.8s | **3-8x faster** |
+| list | 5-15s | <1s | **10-20x faster** |
+| overdue | 5-15s | <1s | **10-20x faster** |
+| capture (AI) | 5-15s | 5-15s | Same (AI needed) |
+
+---
+
 ## Template for Future Entries
 
 ```markdown

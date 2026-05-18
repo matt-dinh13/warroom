@@ -190,7 +190,7 @@ CHAT_MEMORY — 2e87de8f1a4e45d09ac79fcc88a92d86
 | Work hours | :30 marks | `30 3-9 * * 1-5` | T2-T6 | Dispatches: 10:30 drift, 13:30 afternoon, 15:30 push, 16:30 drift |
 | Weekend AM | 09:30 | `30 2 * * 6` | T7 | Weekend morning |
 | Weekend PM | 20:00 | `0 13 * * 6` | T7 | Weekend evening |
-| Power Block | 23:00 | `0 16 * * 1-5` | T2-T6 | Night session |
+| Power Block | 23:30 | `30 16 * * 1-5` | T2-T6 | Auto-defer + daily summary |
 
 > **Note:** Consolidated from 12 logical slots to 5 cron triggers (CF free plan limit). Internal dispatch in `reminders.js` routes by VN hour/minute.
 
