@@ -1,4 +1,4 @@
-// War Room — Frontend Chat Logic v3.0
+// Stratt — Frontend Chat Logic v3.0
 // Markdown renderer + urgency colors + ADHD-optimized display
 
 const $ = (sel) => document.querySelector(sel);
@@ -19,7 +19,7 @@ const headerTime = $('#header-time');
 
 // ─── State ────────────────────────────────────────
 let isProcessing = false;
-const HISTORY_KEY = 'warroom_history';
+const HISTORY_KEY = 'stratt_history';
 const MAX_HISTORY = 50;
 
 // ─── Init ──────────────────────────────────────

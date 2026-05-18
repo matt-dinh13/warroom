@@ -1,6 +1,6 @@
 // Notion API client — adapted for existing "Today" DB schema
 //
-// Property mapping (DB "Today" → War Room concept):
+// Property mapping (DB "Today" → Stratt concept):
 //   Name (title)       → Task title
 //   Context (select)   → Project (GMA, HOSEL, SALES, etc.)
 //   Priority (select)  → Priority (High/Medium/Low)

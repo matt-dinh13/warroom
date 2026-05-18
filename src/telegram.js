@@ -22,7 +22,7 @@ export async function handleTelegramWebhook(update, env, processChat) {
 
   if (text === '/start') {
     await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,
-      '⚔️ <b>War Room Online</b>\n\n' +
+      '🚀 <b>Stratt Online</b>\n\n' +
       'Gõ task hoặc dùng commands:\n' +
       '• /plan — Plan hôm nay\n' +
       '• /backlog — Xem ý tưởng\n' +

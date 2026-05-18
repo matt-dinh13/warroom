@@ -1,6 +1,6 @@
 // Password gate middleware — SHA-256 hash + secure cookies
 
-const COOKIE_NAME = 'warroom_auth';
+const COOKIE_NAME = 'stratt_auth';
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 /**
@@ -8,7 +8,7 @@ const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
  */
 async function hashPassword(password) {
   const encoder = new TextEncoder();
-  const data = encoder.encode(password + '_warroom_salt_2026');
+  const data = encoder.encode(password + '_stratt_salt_2026');
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return 'wrm_' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
