@@ -243,3 +243,4 @@ npx wrangler tail
 | 3.2 | 2026-05-18 | LIST_TASKS intent + regex fallback. AI CAPABILITIES section. Telegram format fix (MD→HTML, strip JSON). Anti-hallucination guards (CAPTURE safety net). Do Date sync. Password: HailMary13 |
 | 3.3 | 2026-05-18 | Robust JSON parser (multi-strategy extraction). Memory TTL 1h→24h. Cleaned 25 duplicate tasks. |
 | 3.4 | 2026-05-18 | Bug fixes: conversation memory save, auth ping shortcircuit, weekly report date filter, CAPTURE_SPLIT duplicate fix, t.deadline→t.due_date field name fix |
+| 3.5 | 2026-05-18 | CAPTURE/EDIT fallback: server-side parsing when AI returns plain text. editTask supports all fields (assigned_by, notes, title, resource, status, source). Confirmation response on task create. |

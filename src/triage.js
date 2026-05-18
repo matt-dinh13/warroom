@@ -88,15 +88,86 @@ export async function processChat(userMessage, env, chatId = 'web') {
   }
 
   // ─── Safety net: CAPTURE without notion_action ──────────────
-  // AI sometimes hallucinates "đã tạo" but doesn't send notion_action
+  // AI sometimes returns plain text instead of JSON for CAPTURE
   const captureIntents = ['CAPTURE', 'CAPTURE_BATCH', 'CAPTURE_SPLIT'];
   if (captureIntents.includes(aiResult.intent) && !action) {
-    console.error('BUG: AI returned CAPTURE intent without notion_action!', JSON.stringify(aiResult));
-    aiResult.response_text = '⚠️ **Lỗi hệ thống**: AI không gửi đúng data để tạo task.\n\n' +
-      '💡 Thử lại: gõ rõ từng task, VD:\n' +
-      '"Review deck GMA deadline 20/5"\n' +
-      'hoặc gửi nhiều task:\n' +
-      '"task1, task2, task3"';
+    console.warn('AI returned CAPTURE intent without notion_action, attempting fallback parse');
+    // Try to create task from AI's response text (it usually contains the parsed data)
+    const fallbackTask = tryParseCaptureFromAIResponse(aiResult.response_text, userMessage);
+    if (fallbackTask) {
+      try {
+        notionResult = await createTask(fallbackTask, env);
+        if (notionResult) {
+          const d = fallbackTask;
+          let confirmMsg = `✅ Đã tạo task:\n📌 ${d.title || 'Untitled'}`;
+          if (d.project) confirmMsg += `\n📂 ${d.project}`;
+          if (d.urgency) confirmMsg += ` | ${d.urgency}`;
+          if (d.energy) confirmMsg += ` | ${d.energy}`;
+          if (d.estimate) confirmMsg += `\n⏱ ${d.estimate}p`;
+          if (d.due_date) confirmMsg += ` | 📅 ${d.due_date}`;
+          if (d.assigned_by) confirmMsg += `\n👤 ${d.assigned_by}`;
+          confirmMsg += `\n\n💡 Gõ "plan" để xem ưu tiên.`;
+          aiResult.response_text = confirmMsg;
+        }
+      } catch (err) {
+        console.error('Capture fallback error:', err);
+        aiResult.response_text = '⚠️ **Lỗi hệ thống**: Không tạo được task.\n\n' +
+          `💡 Lỗi: ${err.message}\nThử lại hoặc gõ rõ hơn.`;
+      }
+    } else {
+      aiResult.response_text = '⚠️ **Lỗi hệ thống**: AI không gửi đúng data để tạo task.\n\n' +
+        '💡 Thử lại: gõ rõ từng task, VD:\n' +
+        '"Review deck GMA deadline 20/5"\n' +
+        'hoặc gửi nhiều task:\n' +
+        '"task1, task2, task3"';
+    }
+  }
+
+  // ─── CAPTURE fallback for CLARIFY intent with task-like content ──────
+  // AI returned CLARIFY but user clearly wanted to create a task AND AI's response shows it parsed correctly
+  if (!action && aiResult.intent === 'CLARIFY' && !notionResult &&
+      /t[aạ]o|capture|th[eê]m|add/i.test(userMessage) &&
+      /đ[aã] t[aạ]o|📌/i.test(aiResult.response_text)) {
+    const fallbackTask = tryParseCaptureFromAIResponse(aiResult.response_text, userMessage);
+    if (fallbackTask) {
+      try {
+        notionResult = await createTask(fallbackTask, env);
+        if (notionResult) {
+          const d = fallbackTask;
+          let confirmMsg = `✅ Đã tạo task:\n📌 ${d.title || 'Untitled'}`;
+          if (d.project) confirmMsg += `\n📂 ${d.project}`;
+          if (d.urgency) confirmMsg += ` | ${d.urgency}`;
+          if (d.energy) confirmMsg += ` | ${d.energy}`;
+          if (d.estimate) confirmMsg += `\n⏱ ${d.estimate}p`;
+          if (d.due_date) confirmMsg += ` | 📅 ${d.due_date}`;
+          if (d.assigned_by) confirmMsg += `\n👤 ${d.assigned_by}`;
+          confirmMsg += `\n\n💡 Gõ "plan" để xem ưu tiên.`;
+          aiResult.response_text = confirmMsg;
+          aiResult.intent = 'CAPTURE';
+        }
+      } catch (err) {
+        console.error('Capture CLARIFY fallback error:', err);
+      }
+    }
+  }
+
+  // ─── EDIT fallback: AI returned plain text instead of JSON ──────
+  // Detect EDIT intent from user message when AI failed to return notion_action
+  if (!action && /s[uử]a|edit|change|[đd][ổo]i|update|c[aậ]p nh[aậ]t|stakeholder|assigned|giao cho/i.test(userMessage)) {
+    const editFallback = tryParseEditFromMessage(userMessage, aiResult.response_text);
+    if (editFallback) {
+      try {
+        const editResult = await editTask(editFallback.task_title, editFallback.updates, env);
+        if (editResult) {
+          notionResult = editResult;
+          const changes = Object.entries(editFallback.updates).map(([k, v]) => `  • ${k}: ${v}`).join('\n');
+          aiResult.response_text = `✏️ Đã sửa "${editResult.title}":\n${changes}\n\n💡 Gõ "plan" để xem lại.`;
+          aiResult.intent = 'EDIT';
+        }
+      } catch (err) {
+        console.error('Edit fallback error:', err);
+      }
+    }
   }
 
   if (action) {
@@ -119,6 +190,21 @@ export async function processChat(userMessage, env, chatId = 'web') {
             aiResult.response_text = `✅ Đã tạo + chia nhỏ:\n📌 ${action.data.parent.title}\n📦 ${action.data.subtasks.length} sub-tasks\n\n💡 Gõ "plan" để xem.`;
           } else {
             notionResult = await createTask(action.data, env);
+            // Build confirmation response after successful creation
+            if (notionResult) {
+              const d = action.data;
+              let confirmMsg = `✅ Đã tạo task:\n📌 ${d.title || 'Untitled'}`;
+              if (d.project) confirmMsg += `\n📂 ${d.project}`;
+              if (d.urgency) confirmMsg += ` | ${d.urgency}`;
+              if (d.energy) confirmMsg += ` | ${d.energy}`;
+              if (d.estimate) confirmMsg += `\n⏱ ${d.estimate}p`;
+              if (d.due_date) confirmMsg += ` | 📅 ${d.due_date}`;
+              if (d.block) confirmMsg += ` | ${d.block}`;
+              if (d.assigned_by) confirmMsg += `\n👤 ${d.assigned_by}`;
+              if (d.source) confirmMsg += ` | ${d.source}`;
+              confirmMsg += `\n\n💡 Gõ "plan" để xem ưu tiên.`;
+              aiResult.response_text = confirmMsg;
+            }
           }
           break;
 
@@ -175,7 +261,7 @@ export async function processChat(userMessage, env, chatId = 'web') {
           if (action.data?.task_title && action.data?.updates) {
             notionResult = await editTask(action.data.task_title, action.data.updates, env);
             if (!notionResult) {
-              aiResult.response_text = `❌ Không tìm thấy "${action.data.task_title}".`;
+              aiResult.response_text = `❌ Không tìm thấy "${action.data.task_title}".\n💡 Gõ chính xác hơn.`;
             } else {
               const changes = Object.entries(action.data.updates).map(([k, v]) => `  • ${k}: ${v}`).join('\n');
               aiResult.response_text = `✏️ Đã sửa "${notionResult.title}":\n${changes}\n\n💡 Gõ "plan" để xem lại.`;
@@ -266,7 +352,9 @@ export async function processChat(userMessage, env, chatId = 'web') {
 
   // ─── Final guard: strip hallucinated "đã tạo" claims ──────
   // If no Notion write happened but AI claims success, strip the lie
+  // Skip if we already handled via fallback (notionResult is set)
   if (!notionResult && !captureIntents.includes(aiResult.intent) &&
+      aiResult.intent !== 'EDIT' &&
       /đã tạo|đã capture|đã lưu|created|saved/i.test(aiResult.response_text)) {
     // Check if this was supposed to be a capture
     if (/task|tạo|capture|thêm|add/i.test(userMessage)) {
@@ -474,4 +562,202 @@ function buildBacklogResponse(tasks) {
   }
   r += '💡 Gõ "pick [tên]" để bắt đầu.';
   return r;
+}
+
+// ─── Edit Fallback Parser ─────────────────────────────────────
+// When AI returns plain text instead of JSON for EDIT commands,
+// try to extract task_title and updates from the user message + AI response
+
+function tryParseEditFromMessage(userMessage, aiResponse) {
+  const msg = userMessage.toLowerCase();
+
+  // Field patterns: "sửa [field] task [name] thành/sang/: [value]"
+  // or "sửa task [name], [field]: [value]"
+  const fieldAliases = {
+    assigned_by: /(?:stakeholder|assigned|giao cho|ng[uư][oờ]i giao|assigned.?by)/i,
+    deadline: /(?:deadline|h[aạ]n|due.?date|ng[aà]y)/i,
+    urgency: /(?:urgency|[uư]u ti[eê]n|m[uứ]c [đd][oộ])/i,
+    estimate: /(?:estimate|th[oờ]i gian|[đd][oộ] d[aà]i|bao l[aâ]u)/i,
+    project: /(?:project|d[uự] [aá]n|context)/i,
+    energy: /(?:energy|n[aă]ng l[uư][oợ]ng)/i,
+    block: /(?:block|kh[uố]i|slot)/i,
+    source: /(?:source|ngu[oồ]n)/i,
+    notes: /(?:note|ghi ch[uú]|context)/i,
+    title: /(?:title|t[eê]n|rename)/i,
+    resource: /(?:resource|link|url)/i,
+  };
+
+  // Try to find which field is being edited
+  let detectedField = null;
+  for (const [field, regex] of Object.entries(fieldAliases)) {
+    if (regex.test(userMessage)) {
+      detectedField = field;
+      break;
+    }
+  }
+
+  if (!detectedField) return null;
+
+  // Try to extract task title — look for "task [name]" pattern
+  // Common patterns:
+  // "sửa stakeholders task ABC thành XYZ"
+  // "sửa task ABC, stakeholders: XYZ"
+  // "update assigned_by cho task ABC: XYZ"
+  let taskTitle = null;
+  let value = null;
+
+  // Pattern 1: "task [title] thành/sang/: [value]"
+  const p1 = userMessage.match(/task\s+(.+?)(?:\s*(?:th[aà]nh|sang|=|:)\s*)(.+)/i);
+  if (p1) {
+    // Check if field keyword is in the "title" part — split it out
+    const rawTitle = p1[1].trim();
+    const rawValue = p1[2].trim();
+
+    // Remove field keyword from title if present
+    let cleanTitle = rawTitle;
+    for (const regex of Object.values(fieldAliases)) {
+      cleanTitle = cleanTitle.replace(regex, '').trim();
+    }
+    // Remove trailing comma, colon
+    cleanTitle = cleanTitle.replace(/[,:\s]+$/, '').trim();
+
+    if (cleanTitle) {
+      taskTitle = cleanTitle;
+      value = rawValue;
+    }
+  }
+
+  // Pattern 2: "sửa task [title], [field]: [value]"
+  if (!taskTitle) {
+    const p2 = userMessage.match(/(?:s[uử]a|edit|update|[đd][ổo]i|c[aậ]p nh[aậ]t)\s+(?:task\s+)?(.+?)[,]\s*.+?(?::|th[aà]nh|sang|=)\s*(.+)/i);
+    if (p2) {
+      let cleanTitle = p2[1].trim();
+      for (const regex of Object.values(fieldAliases)) {
+        cleanTitle = cleanTitle.replace(regex, '').trim();
+      }
+      cleanTitle = cleanTitle.replace(/[,:\s]+$/, '').trim();
+      if (cleanTitle) {
+        taskTitle = cleanTitle;
+        value = p2[2].trim();
+      }
+    }
+  }
+
+  // Pattern 3: Try to extract from AI response (it often mentions the task name)
+  if (!taskTitle && aiResponse) {
+    const titleMatch = aiResponse.match(/📌\s*(.+?)(?:\n|$)/);
+    if (titleMatch) {
+      taskTitle = titleMatch[1].trim();
+    }
+  }
+
+  // Extract value from AI response if we couldn't get it from user message
+  if (!value && aiResponse) {
+    // Look for field-specific patterns in AI response
+    const valuePatterns = [
+      /(?:Stakeholders?|Assigned|Giao cho)[:\s]*(.+?)(?:\n|$)/i,
+      /(?:Deadline|Hạn)[:\s]*(.+?)(?:\n|$)/i,
+      /(?:Notes?|Ghi chú)[:\s]*(.+?)(?:\n|$)/i,
+    ];
+    for (const pat of valuePatterns) {
+      const m = aiResponse.match(pat);
+      if (m) { value = m[1].trim(); break; }
+    }
+  }
+
+  if (!taskTitle || !value) return null;
+
+  // Post-process value based on field type
+  if (detectedField === 'deadline' && value) {
+    // Convert DD/MM or DD/MM/YYYY to ISO format
+    const dateMatch = value.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?/);
+    if (dateMatch) {
+      const year = dateMatch[3] || '2026';
+      value = `${year}-${dateMatch[2].padStart(2, '0')}-${dateMatch[1].padStart(2, '0')}`;
+    }
+    // Also try ISO from AI response
+    if (aiResponse) {
+      const isoMatch = aiResponse.match(/(\d{4}-\d{2}-\d{2})/);
+      if (isoMatch) value = isoMatch[1];
+    }
+  }
+  if (detectedField === 'estimate' && value) {
+    const numMatch = value.match(/(\d+)/);
+    if (numMatch) value = parseInt(numMatch[1]);
+  }
+
+  return {
+    task_title: taskTitle,
+    updates: { [detectedField]: value },
+  };
+}
+
+// ─── Capture Fallback Parser ──────────────────────────────────
+// When AI returns plain text instead of JSON for CAPTURE commands,
+// parse the structured response text to extract task data
+
+function tryParseCaptureFromAIResponse(aiResponse, userMessage) {
+  if (!aiResponse) return null;
+
+  // Extract title from 📌 line
+  const titleMatch = aiResponse.match(/📌\s*(.+?)(?:\n|$)/);
+  if (!titleMatch) return null;
+
+  const title = titleMatch[1].trim();
+  if (!title) return null;
+
+  const task = { title };
+
+  // Extract project from 📂 line or [PROJECT] pattern
+  const projectMatch = aiResponse.match(/📂\s*(\w+)/);
+  if (projectMatch) task.project = projectMatch[1];
+
+  // Extract urgency
+  if (/🔴|Fire/i.test(aiResponse)) task.urgency = '🔴 Fire';
+  else if (/🟡|Important/i.test(aiResponse)) task.urgency = '🟡 Important';
+  else if (/🟢|Wait/i.test(aiResponse)) task.urgency = '🟢 Wait';
+  else if (/⚪|Someday/i.test(aiResponse)) task.urgency = '⚪ Someday';
+
+  // Extract energy
+  if (/⚡|High/i.test(aiResponse)) task.energy = '⚡ High';
+  else if (/🔋|Med/i.test(aiResponse)) task.energy = '🔋 Med';
+  else if (/😴|Low/i.test(aiResponse)) task.energy = '😴 Low';
+
+  // Extract estimate (number followed by p or phút)
+  const estMatch = aiResponse.match(/⏱\s*(\d+)p/);
+  if (estMatch) task.estimate = parseInt(estMatch[1]);
+
+  // Extract deadline (date pattern)
+  const dateMatch = aiResponse.match(/📅\s*(\d{4}-\d{2}-\d{2})/);
+  if (dateMatch) {
+    task.due_date = dateMatch[1];
+  } else {
+    // Try DD/MM format from user message
+    const ddmm = userMessage.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?/);
+    if (ddmm) {
+      const year = ddmm[3] || '2026';
+      task.due_date = `${year}-${ddmm[2].padStart(2, '0')}-${ddmm[1].padStart(2, '0')}`;
+    }
+  }
+
+  // Extract assigned_by
+  const assignedMatch = aiResponse.match(/👤\s*(.+?)(?:\n|$)/);
+  if (assignedMatch) task.assigned_by = assignedMatch[1].trim();
+
+  // Extract source from project
+  if (task.project) {
+    const sourceMap = {
+      'GMA': 'EIT', 'HOSEL': 'EIT', 'SALES': 'EIT', 'EMPULSE': 'EIT', 'KV': 'EIT',
+      'EDU': 'Side Gig', 'TEACH': 'Side Gig',
+      'LEARN': 'Self', 'PERSONAL': 'Personal',
+    };
+    task.source = sourceMap[task.project] || 'EIT';
+  }
+
+  // Extract block
+  if (/☀️|AM/i.test(aiResponse)) task.block = '☀️ AM';
+  else if (/🌤️|PM/i.test(aiResponse)) task.block = '🌤️ PM';
+  else if (/🌙|Power Block/i.test(aiResponse)) task.block = '🌙 Power Block';
+
+  return task;
 }

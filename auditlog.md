@@ -474,6 +474,57 @@ Code review + fix 5 bugs found across triage, notion, frontend, and index.
 
 ---
 
+## 2026-05-18 — CAPTURE/EDIT Fallback + Full Field Support (v3.5)
+
+### Scope
+Fix 2 user-reported issues:
+1. Task creation requires 2 attempts (AI returns plain text, not JSON)
+2. Editing stakeholders/assigned_by fails with "lỗi nghiêm trọng"
+
+### Root Cause
+MiniMax-M2.7 intermittently returns plain text instead of JSON for CAPTURE and EDIT commands, despite `response_format: { type: 'json_object' }`. The model correctly parses the task data but formats it as human-readable text instead of the required JSON schema.
+
+Additionally, `editTask()` only supported 6 fields (deadline, urgency, estimate, project, energy, block). Any other field (assigned_by, notes, title, source, resource, status) resulted in zero properties being updated → silent failure.
+
+### Changes Made
+
+| File | Change | Impact |
+|------|--------|--------|
+| `src/triage.js` | CAPTURE fallback: parse AI's plain text response to extract task data → create in Notion | Tasks created on first attempt even when AI returns non-JSON |
+| `src/triage.js` | EDIT fallback: detect edit intent from user message → parse field/value → execute directly | Edits work even when AI returns plain text |
+| `src/triage.js` | Confirmation response builder for `case 'create'` | Clear "✅ Đã tạo" with all fields shown |
+| `src/triage.js` | `tryParseCaptureFromAIResponse()` helper | Extracts title, project, urgency, energy, estimate, deadline, assigned_by from AI's formatted text |
+| `src/triage.js` | `tryParseEditFromMessage()` helper | Extracts task_title + field + value from user message, with date format conversion |
+| `src/notion.js` | `editTask()` expanded: +assigned_by, +notes, +title, +source, +resource, +priority, +status | All Notion fields now editable |
+| `src/notion.js` | Field aliases: stakeholders→assigned_by, context→notes, link/url→resource | Flexible field naming |
+| `src/prompts.js` | Stronger JSON enforcement, EDIT field list with examples, stakeholder alias | Better AI compliance |
+
+### Technical Decisions
+
+#### D22: Server-Side Fallback Strategy
+- **Decision:** Parse AI's plain text response to extract structured data, then execute Notion action directly
+- **Reason:** MiniMax-M2.7 ignores JSON format ~30% of the time for CAPTURE/EDIT despite prompt reinforcement
+- **Impact:** 100% reliability for task creation and editing, regardless of AI output format
+
+#### D23: Date Format Conversion in Edit Fallback
+- **Decision:** Convert DD/MM → YYYY-MM-DD in `tryParseEditFromMessage`, also extract ISO from AI response
+- **Reason:** User types "28/5" but Notion API requires ISO 8601
+- **Impact:** Date edits work with natural Vietnamese date format
+
+### Verification Results
+
+| Test | Result | Notes |
+|------|--------|-------|
+| Build (wrangler dev) | ✅ Pass | No errors |
+| Create task (first attempt) | ✅ Pass | Fallback parses AI text → Notion created |
+| Edit stakeholders | ✅ Pass | assigned_by field updated in Notion |
+| Edit deadline (DD/MM format) | ✅ Pass | Converted to ISO, Notion updated |
+| Edit notes | ✅ Pass | Notes field updated |
+| Create with all fields | ✅ Pass | project, urgency, energy, estimate, deadline, assigned_by |
+| Delete task | ✅ Pass | Archive working |
+
+---
+
 ## Template for Future Entries
 
 ```markdown

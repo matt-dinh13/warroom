@@ -74,6 +74,7 @@ Phân tích input và xác định intent:
 - Hỏi "quên/overdue/bỏ sót" → OVERDUE_CHECK
 - "done/xong/drop" + tên task → UPDATE
 - "đổi/sửa/edit/change/reschedule" + field + task → EDIT
+- "stakeholders/assigned/giao cho/người giao" → EDIT với field "assigned_by"
 - "xoá/delete/remove/bỏ" + tên task → DELETE
 - "dọn dẹp/cleanup/xoá hết/clear" → CLEANUP (list all → confirm)
 - "summary/báo cáo/report" → REPORT
@@ -81,7 +82,9 @@ Phân tích input và xác định intent:
 - Không rõ ý định hoặc thiếu info → CLARIFY
 
 ## OUTPUT FORMAT
-LUÔN trả về JSON hợp lệ, không thêm text ngoài JSON:
+⚠️ CRITICAL: LUÔN trả về JSON hợp lệ, KHÔNG BAO GIỜ trả text thuần. Mọi response PHẢI là JSON object.
+Nếu intent là EDIT → BẮT BUỘC trả notion_action với type "edit".
+Nếu intent là CAPTURE → BẮT BUỘC trả notion_action với type "create".
 {
   "intent": "CAPTURE|CAPTURE_BATCH|CAPTURE_SPLIT|BACKLOG|BACKLOG_BROWSE|TRIAGE|LIST_TASKS|OVERDUE_CHECK|UPDATE|EDIT|DELETE|CLEANUP|REPORT|LOAD_CHECK|CLARIFY",
   "response_text": "text hiển thị cho user (đừng nói 'đã tạo' — hệ thống tự xác nhận)",
@@ -109,7 +112,11 @@ LUÔN trả về JSON hợp lệ, không thêm text ngoài JSON:
       // "parent": { full task data },
       // "subtasks": [ { "title": "...", "estimate": 25, "block": "..." } ]
       // For UPDATE: "task_title": "...", "new_status": "Completed"
-      // For EDIT: "task_title": "...", "updates": { "deadline": "...", ... }
+      // For EDIT: "task_title": "...", "updates": { "deadline": "...", "urgency": "...", "estimate": 30, "project": "...", "energy": "...", "block": "...", "source": "...", "assigned_by": "...", "notes": "...", "title": "...", "resource": "...", "priority": "...", "status": "..." }
+      // EDIT EXAMPLES:
+      // User: "sửa task X, stakeholders: anh Hải" → updates: { "assigned_by": "anh Hải" }
+      // User: "đổi deadline task X sang 30/5" → updates: { "deadline": "2026-05-30" }
+      // User: "thêm note cho task X: cần review" → updates: { "notes": "cần review" }
       // For QUERY: "query_type": "today|overdue|all_active|weekly_report|backlog"
     }
   },

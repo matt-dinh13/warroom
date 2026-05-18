@@ -370,7 +370,7 @@ export async function editTask(taskTitle, updates, env) {
     properties['Urgency'] = { select: { name: updates.urgency } };
   }
   if (updates.estimate) {
-    properties['Estimate'] = { number: updates.estimate };
+    properties['Estimate'] = { number: parseInt(updates.estimate) || updates.estimate };
   }
   if (updates.project) {
     properties['Context'] = { select: { name: updates.project } };
@@ -381,9 +381,48 @@ export async function editTask(taskTitle, updates, env) {
   if (updates.block) {
     properties['Block'] = { select: { name: updates.block } };
   }
+  if (updates.source) {
+    properties['Source'] = { select: { name: updates.source } };
+  }
+  if (updates.assigned_by || updates.stakeholders || updates.assigned) {
+    const value = updates.assigned_by || updates.stakeholders || updates.assigned;
+    properties['Assigned By'] = {
+      rich_text: [{ text: { content: value } }],
+    };
+  }
+  if (updates.notes || updates.context) {
+    const value = updates.notes || updates.context;
+    properties['Notes'] = {
+      rich_text: [{ text: { content: value } }],
+    };
+  }
+  if (updates.title || updates.name) {
+    const value = updates.title || updates.name;
+    properties['Name'] = {
+      title: [{ text: { content: value } }],
+    };
+  }
+  if (updates.resource || updates.link || updates.url) {
+    const value = updates.resource || updates.link || updates.url;
+    properties['Resource'] = { url: value };
+  }
+  if (updates.priority) {
+    properties['Priority'] = { select: { name: updates.priority } };
+  }
+  if (updates.status) {
+    const statusMap = {
+      'To do': 'To do',
+      'In progress': 'In progress',
+      'Completed': 'Completed',
+      'Pending': 'Pending / Wait for approved',
+    };
+    properties['State'] = { status: { name: statusMap[updates.status] || updates.status } };
+  }
 
   if (Object.keys(properties).length === 0) {
-    return parseNotionTask(match); // Nothing to update
+    console.warn('editTask: no recognized fields in updates:', JSON.stringify(updates));
+    // Still return the task so caller knows it was found, but log the issue
+    return parseNotionTask(match);
   }
 
   const updateResponse = await fetch(`${NOTION_BASE}/pages/${match.id}`, {
