@@ -1,7 +1,7 @@
 # 🚀 Stratt — Project Context
 
 > File này chứa đủ context để developer mới (hoặc AI agent) tiếp tục phát triển mà không cần hỏi lại.
-> Cập nhật lần cuối: 2026-05-18 (v3.1)
+> Cập nhật lần cuối: 2026-05-18 (v3.2)
 
 ---
 
@@ -98,6 +98,7 @@ File: `src/prompts.js`
 - Drop → confirm trước
 - Luôn show load % khi plan
 - Overload → CẢNH BÁO
+- KHÔNG BAO GIỜ nói "mình không truy vấn được Notion" — AI CÓ THỂ query trực tiếp
 - Task > 60p → auto chia nhỏ (CAPTURE_SPLIT)
 - Sử dụng datetime context header
 
@@ -109,6 +110,7 @@ File: `src/prompts.js`
 | BACKLOG | Link, video, idea, "lưu lại/someday" |
 | BACKLOG_BROWSE | "có gì làm không/rảnh/pick" |
 | TRIAGE | "ưu tiên", "plan today", "hôm nay" |
+| LIST_TASKS | "liệt kê/list/xem tasks/task chưa đóng" |
 | OVERDUE_CHECK | "quên", "overdue", "bỏ sót" |
 | UPDATE | "done/xong/drop" + tên task |
 | EDIT | "sửa/đổi/reschedule" + field + task |
@@ -236,3 +238,4 @@ npx wrangler tail
 | 2.1 | 2026-05-17 | Conversation memory, EDIT, fuzzy search, Telegram keyboard, CAPTURE_SPLIT |
 | 3.0 | 2026-05-18 | Gamification (XP/Streak/Achievements), CAPTURE_BATCH, ADHD response optimization, urgency colors, HTML Telegram, 8AM briefing, drift checks, push slot |
 | 3.1 | 2026-05-18 | Rebrand: War Room → Stratt. DELETE/CLEANUP commands. New domain: stratt.rocky13.workers.dev |
+| 3.2 | 2026-05-18 | LIST_TASKS intent + regex fallback. AI CAPABILITIES section. Password: HailMary13 |

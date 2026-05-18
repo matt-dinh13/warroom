@@ -333,6 +333,36 @@ Rebrand from "War Room" to "Stratt" (Commander Stratt, Project Hail Mary). Add D
 
 ---
 
+## 2026-05-18 — LIST_TASKS Fix (v3.2)
+
+### Scope
+Fix critical gap: AI claimed it couldn't query Notion. Added LIST_TASKS intent + regex fallback.
+
+### Root Cause
+MiniMax AI didn't know it had Notion query capability → responded "mình không truy vấn được Notion" when user asked to list tasks.
+
+### Changes Made
+
+| File | Change |
+|------|--------|
+| `src/prompts.js` | Added `CAPABILITIES` section telling AI it CAN query Notion. Added `LIST_TASKS` intent. |
+| `src/triage.js` | Added regex fallback: detects "liệt kê/list/xem tasks" → forces direct Notion query, bypassing AI routing. |
+
+### Technical Decision
+
+#### D19: Regex Fallback for Critical Commands
+- **Decision:** Add regex-based intent detection as safety net alongside AI routing
+- **Reason:** AI hallucinated "can't query" — regex ensures critical commands always work
+- **Pattern:** Check regex BEFORE processing AI's notion_action; override if matched
+
+### Verification
+| Test | Result |
+|------|--------|
+| "Liệt kê các task chưa đóng" | ✅ Returns 10 real tasks from Notion, grouped by status |
+| Git push | ✅ `ba5f4af` |
+
+---
+
 ## Template for Future Entries
 
 ```markdown
