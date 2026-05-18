@@ -1,13 +1,13 @@
-# ⚔️ War Room — Project Context
+# 🚀 Stratt — Project Context
 
 > File này chứa đủ context để developer mới (hoặc AI agent) tiếp tục phát triển mà không cần hỏi lại.
-> Cập nhật lần cuối: 2026-05-18 (v3.0)
+> Cập nhật lần cuối: 2026-05-18 (v3.1)
 
 ---
 
 ## 1. SẢN PHẨM
 
-**War Room** là web chat app giúp Matt (Senior BA, ADHD) quản lý task từ nhiều nguồn.
+**Stratt** (named after Commander Stratt from Project Hail Mary) là web chat app giúp Matt (Senior BA, ADHD) quản lý task từ nhiều nguồn.
 
 **Flow:** Chat input → MiniMax AI parse/triage → Notion CRUD → trả kết quả về chat.
 
@@ -58,9 +58,9 @@ Cloudflare Worker (src/index.js)
 
 Tái sử dụng database **"Today"** (`1a65fcb4-61d1-814c-9f08-e65b9e28af64`).
 
-### Property Mapping (DB Name → War Room Concept)
+### Property Mapping (DB Name → Stratt Concept)
 
-| DB Property | Type | War Room Concept | Notes |
+| DB Property | Type | Stratt Concept | Notes |
 |-------------|------|------------------|-------|
 | `Name` | title | Task title | — |
 | `Context` | select | Project | GMA, HOSEL, SALES, EMPULSE, KV, EDU, TEACH, LEARN, PERSONAL |
@@ -79,7 +79,7 @@ Tái sử dụng database **"Today"** (`1a65fcb4-61d1-814c-9f08-e65b9e28af64`).
 
 ### Status Mapping
 
-| War Room Intent | Notion State |
+| Stratt Intent | Notion State |
 |----------------|--------------|
 | New task | → `To do` |
 | Done / Xong | → `Completed` |
@@ -114,6 +114,8 @@ File: `src/prompts.js`
 | EDIT | "sửa/đổi/reschedule" + field + task |
 | REPORT | "summary", "báo cáo", "report" |
 | LOAD_CHECK | "overload", "quá tải", "check load" |
+| DELETE | "xoá/delete/remove/bỏ" + tên task |
+| CLEANUP | "dọn dẹp/cleanup/xoá hết" |
 | CLARIFY | Không rõ ý định |
 
 ---
@@ -121,7 +123,7 @@ File: `src/prompts.js`
 ## 6. FILE STRUCTURE
 
 ```
-warroom/
+stratt/  (local dir: warroom/)
 ├── wrangler.toml           # CF Workers config + KV binding + cron
 ├── package.json            # Only dep: wrangler
 ├── .dev.vars               # 🔒 Local secrets (git-ignored)
@@ -233,3 +235,4 @@ npx wrangler tail
 | 2.0 | 2026-05-17 | SHA-256 auth, rate limiting, datetime injection, chat history |
 | 2.1 | 2026-05-17 | Conversation memory, EDIT, fuzzy search, Telegram keyboard, CAPTURE_SPLIT |
 | 3.0 | 2026-05-18 | Gamification (XP/Streak/Achievements), CAPTURE_BATCH, ADHD response optimization, urgency colors, HTML Telegram, 8AM briefing, drift checks, push slot |
+| 3.1 | 2026-05-18 | Rebrand: War Room → Stratt. DELETE/CLEANUP commands. New domain: stratt.rocky13.workers.dev |

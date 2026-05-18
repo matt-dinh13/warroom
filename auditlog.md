@@ -1,4 +1,4 @@
-# ⚔️ War Room — Audit Log
+# 🚀 Stratt — Audit Log
 
 > Lịch sử thay đổi và quyết định kỹ thuật.
 
@@ -284,6 +284,52 @@ PO-driven redesign targeting ADHD-specific pain points: drift zones, task paraly
 | Plan response (web) | ✅ Pass | Clean, focused layout |
 | Check load (web) | ✅ Pass | Table + bold formatting |
 | Git push | ✅ Pass | v3.0 |
+
+---
+
+## 2026-05-18 — Rebrand + DELETE (v3.1)
+
+### Scope
+Rebrand from "War Room" to "Stratt" (Commander Stratt, Project Hail Mary). Add DELETE/CLEANUP commands.
+
+### Changes Made
+
+| File | Change | Impact |
+|------|--------|--------|
+| `wrangler.toml` | Worker name: warroom → stratt | New domain: stratt.rocky13.workers.dev |
+| `public/index.html` | All branding: ⚔️ War Room → 🚀 Stratt | Login + chat header |
+| `public/app.js` | localStorage key: warroom_history → stratt_history | Frontend |
+| `src/auth.js` | Cookie: warroom_auth → stratt_auth, salt updated | Auth |
+| `src/telegram.js` | Start message: War Room Online → Stratt Online | Telegram |
+| `src/notion.js` | NEW: archiveTask, bulkArchiveTasks, listAllTasks | DELETE support |
+| `src/prompts.js` | Added DELETE/CLEANUP intents | AI detection |
+| `src/triage.js` | Added delete/cleanup handlers | Task deletion |
+| `APP_PASSWORD` | Changed from warroom2026 → HailMary13 | Security |
+
+### Technical Decisions
+
+#### D17: Rebrand Strategy
+- **Decision:** Create new CF worker "stratt", delete old "warroom"
+- **Reason:** CF free plan cron limit is per-account; old worker must be deleted first
+- **Impact:** All secrets re-set, Telegram webhook updated, old domain gone
+
+#### D18: Soft Delete (Archive)
+- **Decision:** Use Notion `archived: true` instead of hard delete
+- **Reason:** Recoverable if user accidentally deletes wrong task
+- **Impact:** Tasks disappear from views but can be restored in Notion
+
+### Verification Results
+
+| Test | Result | Notes |
+|------|--------|-------|
+| Deploy stratt | ✅ Pass | stratt.rocky13.workers.dev |
+| Login with new password | ✅ Pass | HailMary13 |
+| Branding (🚀 Stratt) | ✅ Pass | Login + header |
+| Plan command | ✅ Pass | Working |
+| Delete command | ✅ Pass | Archive task |
+| Cleanup command | ✅ Pass | List all tasks |
+| Telegram webhook | ✅ Pass | Updated to new domain |
+| Git push | ✅ Pass | v3.1 |
 
 ---
 
