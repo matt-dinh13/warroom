@@ -1,6 +1,6 @@
 // Triage logic v3.0 — ADHD-optimized responses + gamification
 import { callMiniMax } from './minimax.js';
-import { createTask, queryTasks, updateTaskStatus, editTask } from './notion.js';
+import { createTask, queryTasks, updateTaskStatus, editTask, archiveTask, listAllTasks } from './notion.js';
 import { SYSTEM_PROMPT } from './prompts.js';
 import { recordCompletion, recordBatch, getStats, buildStatsFooter, buildAchievementMsg } from './gamification.js';
 
@@ -116,6 +116,31 @@ export async function processChat(userMessage, env, chatId = 'web') {
               const changes = Object.entries(action.data.updates).map(([k, v]) => `  • ${k}: ${v}`).join('\n');
               aiResult.response_text = `✏️ Đã sửa "${notionResult.title}":\n${changes}\n\n💡 Gõ "plan" để xem lại.`;
             }
+          }
+          break;
+
+        case 'delete':
+          if (action.data?.task_title) {
+            const archived = await archiveTask(action.data.task_title, env);
+            if (!archived) {
+              aiResult.response_text = `❌ Không tìm thấy "${action.data.task_title}".\n💡 Gõ chính xác hơn hoặc "dọn dẹp" để xem danh sách.`;
+            } else {
+              aiResult.response_text = `🗑️ Đã xoá: "${archived.title}"\n\n💡 Gõ "plan" để xem task còn lại.`;
+            }
+          }
+          break;
+
+        case 'cleanup':
+          const allTasks = await listAllTasks(env);
+          if (allTasks.length === 0) {
+            aiResult.response_text = '✨ Database trống. Không có gì để dọn!';
+          } else {
+            const taskList = allTasks.map((t, i) => {
+              const status = t.status || 'Unknown';
+              const urgency = t.urgency ? ` | ${t.urgency}` : '';
+              return `${i + 1}. ${t.title} [${status}${urgency}]`;
+            }).join('\n');
+            aiResult.response_text = `🧹 **Dọn dẹp** — ${allTasks.length} tasks:\n\n${taskList}\n\n💡 Gõ "xoá [tên task]" để xoá từng cái, hoặc "xoá completed" để xoá hết task đã xong.`;
           }
           break;
       }

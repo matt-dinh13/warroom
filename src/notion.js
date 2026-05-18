@@ -395,6 +395,103 @@ export async function editTask(taskTitle, updates, env) {
 }
 
 /**
+ * Archive (soft-delete) a task by title — fuzzy search
+ */
+export async function archiveTask(taskTitle, env) {
+  // Search all non-archived tasks
+  const searchResponse = await fetch(
+    `${NOTION_BASE}/databases/${env.NOTION_TASKS_DB_ID}/query`,
+    {
+      method: 'POST',
+      headers: notionHeaders(env.NOTION_API_KEY),
+      body: JSON.stringify({ page_size: 100 }),
+    }
+  );
+
+  if (!searchResponse.ok) {
+    throw new Error(`Notion search error: ${await searchResponse.text()}`);
+  }
+
+  const searchData = await searchResponse.json();
+  const match = findBestMatch(searchData.results, taskTitle);
+
+  if (!match) return null;
+
+  const title = match.properties?.Name?.title?.[0]?.text?.content || 'Untitled';
+
+  // Archive the page
+  const archiveResponse = await fetch(`${NOTION_BASE}/pages/${match.id}`, {
+    method: 'PATCH',
+    headers: notionHeaders(env.NOTION_API_KEY),
+    body: JSON.stringify({ archived: true }),
+  });
+
+  if (!archiveResponse.ok) {
+    throw new Error(`Notion archive error: ${await archiveResponse.text()}`);
+  }
+
+  return { id: match.id, title };
+}
+
+/**
+ * Bulk archive tasks — archive all tasks matching a filter
+ * Returns array of archived task titles
+ */
+export async function bulkArchiveTasks(filter, env) {
+  const searchResponse = await fetch(
+    `${NOTION_BASE}/databases/${env.NOTION_TASKS_DB_ID}/query`,
+    {
+      method: 'POST',
+      headers: notionHeaders(env.NOTION_API_KEY),
+      body: JSON.stringify({ filter, page_size: 100 }),
+    }
+  );
+
+  if (!searchResponse.ok) {
+    throw new Error(`Notion search error: ${await searchResponse.text()}`);
+  }
+
+  const searchData = await searchResponse.json();
+  const archived = [];
+
+  for (const page of searchData.results) {
+    const title = page.properties?.Name?.title?.[0]?.text?.content || 'Untitled';
+    await fetch(`${NOTION_BASE}/pages/${page.id}`, {
+      method: 'PATCH',
+      headers: notionHeaders(env.NOTION_API_KEY),
+      body: JSON.stringify({ archived: true }),
+    });
+    archived.push(title);
+  }
+
+  return archived;
+}
+
+/**
+ * List all tasks (for cleanup review)
+ */
+export async function listAllTasks(env) {
+  const response = await fetch(
+    `${NOTION_BASE}/databases/${env.NOTION_TASKS_DB_ID}/query`,
+    {
+      method: 'POST',
+      headers: notionHeaders(env.NOTION_API_KEY),
+      body: JSON.stringify({
+        sorts: [{ property: 'Name', direction: 'ascending' }],
+        page_size: 100,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Notion list error: ${await response.text()}`);
+  }
+
+  const data = await response.json();
+  return data.results.map(parseNotionTask);
+}
+
+/**
  * Parse a Notion page into a clean task object
  * Adapted for "Today" DB property names
  */
@@ -418,3 +515,4 @@ function parseNotionTask(page) {
     resource: p?.Resource?.url || '',
   };
 }
+
