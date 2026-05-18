@@ -76,9 +76,10 @@ export async function createTask(taskData, env) {
     properties['Estimate'] = { number: taskData.estimate };
   }
 
-  // Date: deadline
+  // Date: deadline + do_date (sync both so Notion views work)
   if (taskData.due_date) {
     properties['Deadline'] = { date: { start: taskData.due_date } };
+    properties['Do Date'] = { date: { start: taskData.due_date } };
   }
 
   // Rich text: assigned_by, context → Notes
@@ -360,6 +361,7 @@ export async function editTask(taskTitle, updates, env) {
 
   if (updates.deadline) {
     properties['Deadline'] = { date: { start: updates.deadline } };
+    properties['Do Date'] = { date: { start: updates.deadline } };
   }
   if (updates.urgency) {
     properties['Urgency'] = { select: { name: updates.urgency } };
@@ -516,3 +518,51 @@ function parseNotionTask(page) {
   };
 }
 
+/**
+ * Backfill: copy Deadline → Do Date for tasks that have Deadline but no Do Date
+ */
+export async function backfillDoDate(env) {
+  // Query all tasks with Deadline set but Do Date empty
+  const response = await fetch(
+    `${NOTION_BASE}/databases/${env.NOTION_TASKS_DB_ID}/query`,
+    {
+      method: 'POST',
+      headers: notionHeaders(env.NOTION_API_KEY),
+      body: JSON.stringify({
+        filter: {
+          and: [
+            { property: 'Deadline', date: { is_not_empty: true } },
+            { property: 'Do Date', date: { is_empty: true } },
+          ],
+        },
+        page_size: 100,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Notion backfill query error: ${await response.text()}`);
+  }
+
+  const data = await response.json();
+  const tasks = data.results;
+  let updated = 0;
+
+  for (const task of tasks) {
+    const deadline = task.properties?.Deadline?.date?.start;
+    if (!deadline) continue;
+
+    await fetch(`${NOTION_BASE}/pages/${task.id}`, {
+      method: 'PATCH',
+      headers: notionHeaders(env.NOTION_API_KEY),
+      body: JSON.stringify({
+        properties: {
+          'Do Date': { date: { start: deadline } },
+        },
+      }),
+    });
+    updated++;
+  }
+
+  return { total: tasks.length, updated };
+}

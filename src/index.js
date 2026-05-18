@@ -4,6 +4,7 @@ import { isAuthenticated, handleLogin } from './auth.js';
 import { processChat } from './triage.js';
 import { handleTelegramWebhook, setTelegramWebhook } from './telegram.js';
 import { handleScheduled } from './reminders.js';
+import { backfillDoDate } from './notion.js';
 
 // ─── Security: Never leak secrets in any response ───────────
 const SECRET_KEYS = ['MINIMAX_API_KEY', 'NOTION_API_KEY', 'NOTION_TASKS_DB_ID', 'NOTION_DAILY_DB_ID', 'APP_PASSWORD', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'];
@@ -158,6 +159,21 @@ export default {
           const result = await setTelegramWebhook(env.TELEGRAM_BOT_TOKEN, webhookUrl);
           return new Response(
             JSON.stringify({ webhook_url: webhookUrl, telegram_response: result }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // POST /api/backfill-dodate — One-time: copy Deadline → Do Date (requires auth)
+        if (path === '/api/backfill-dodate' && request.method === 'POST') {
+          if (!(await isAuthenticated(request, env))) {
+            return new Response(
+              JSON.stringify({ error: 'Unauthorized' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          const result = await backfillDoDate(env);
+          return new Response(
+            JSON.stringify({ success: true, ...result }),
             { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
