@@ -31,8 +31,8 @@ export async function handleScheduled(event, env) {
         await sendPushSlot(env);
       } else if (vnHour === 16 && vnMin === 30) {
         await sendDriftCheck(env, 2); // Drift #2
-      } else if (vnHour === 23 && vnMin === 0) {
-        await sendPowerBlockReminder(env);
+      } else if (vnHour === 23 && vnMin === 30) {
+        await sendAutoDeferSummary(env); // Auto-defer + daily summary
       }
       // Other :30 marks (11:30, 12:30, 14:30) — no action, skip silently
     }
@@ -241,28 +241,51 @@ async function sendAfternoonReminder(env) {
   );
 }
 
-async function sendPowerBlockReminder(env) {
+async function sendAutoDeferSummary(env) {
   const chatId = env.TELEGRAM_CHAT_ID;
   if (!chatId) return;
 
   const tasks = await queryTasks('today', env);
   const stats = await getStats(String(chatId), env);
   const completed = tasks.filter(t => t.status === 'Completed');
-  const remaining = tasks.filter(t => t.status !== 'Completed' && t.urgency !== '⚪ Someday');
+  const remaining = tasks.filter(t => t.status !== 'Completed');
 
-  let msg = `🌙 Power Block (23:00)\n\n`;
-  msg += `✅ Hôm nay: ${completed.length} tasks done!\n`;
-  msg += buildStatsFooter(stats);
+  // Auto-defer: tasks still not done today → move Do Date to tomorrow
+  const tomorrow = new Date(Date.now() + 7 * 60 * 60 * 1000 + 86400000).toISOString().split('T')[0];
+  let deferred = 0;
 
-  if (remaining.length > 0) {
-    msg += `\n\n📋 Còn ${remaining.length} task. Pick 1 quick?`;
-    const quick = remaining.filter(t => (t.estimate || 30) <= 25)[0];
-    if (quick) msg += `\n▶️ ${quick.title}`;
-  } else {
-    msg += '\n\n✅ All clear! Rest well Matt 💤';
+  for (const task of remaining) {
+    if (task.id && task.due_date) {
+      try {
+        await fetch(`https://api.notion.com/v1/pages/${task.id}`, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${env.NOTION_API_KEY}`,
+            'Notion-Version': '2022-06-28',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            properties: { 'Do Date': { date: { start: tomorrow } } },
+          }),
+        });
+        deferred++;
+      } catch {}
+    }
   }
 
-  msg += '\n\n⚠️ Max 1h. Đừng hyperfocus!';
+  let msg = `🌙 Daily Summary (23:30)\n\n`;
+  msg += `✅ Done: ${completed.length} tasks\n`;
+  if (deferred > 0) msg += `📋 Deferred: ${deferred} → mai\n`;
+  msg += buildStatsFooter(stats);
+
+  if (deferred > 0) {
+    msg += `\n\n💤 Không sao, ngày mai tiếp! Rest well Matt.`;
+  } else if (completed.length > 0) {
+    msg += `\n\n🎉 All clear! Great day.`;
+  } else {
+    msg += `\n\n💤 Nghỉ ngơi đi. Mai mới bắt đầu.`;
+  }
+
   await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, msg, 'HTML',
     buildQuickKeyboard()
   );

@@ -24,13 +24,119 @@ async function saveConversation(chatId, messages, env) {
   } catch {}
 }
 
-// ─── Main Entry ──────────────────────────────────────
-export async function processChat(userMessage, env, chatId = 'web') {
-  // Inject datetime context
-  const { dateContext, dayType, capacity, vnHour } = getVNContext();
-  const enrichedMessage = `${dateContext}\n${userMessage}`;
+// ─── Last Plan Cache (for "done 1/2/3") ─────────────
+const LAST_PLAN_PREFIX = 'lastplan:';
 
-  // Build conversation with memory
+async function getLastPlan(chatId, env) {
+  if (!env.CHAT_MEMORY) return [];
+  try { return (await env.CHAT_MEMORY.get(`${LAST_PLAN_PREFIX}${chatId}`, 'json')) || []; } catch { return []; }
+}
+async function saveLastPlan(chatId, tasks, env) {
+  if (!env.CHAT_MEMORY) return;
+  try {
+    const s = tasks.map(t => ({ title: t.title, id: t.id, urgency: t.urgency, project: t.project }));
+    await env.CHAT_MEMORY.put(`${LAST_PLAN_PREFIX}${chatId}`, JSON.stringify(s), { expirationTtl: MEMORY_TTL });
+  } catch {}
+}
+
+function buildResult(intent, text, taskCount) {
+  return { intent, response_text: text, needs_confirmation: false, follow_up_question: null, task_count: taskCount };
+}
+
+function buildCaptureConfirmation(d) {
+  let r = `✅ Đã tạo task:\n📌 ${d.title || 'Untitled'}`;
+  if (d.project) r += `\n📂 ${d.project}`;
+  if (d.urgency) r += ` | ${d.urgency}`;
+  if (d.energy) r += ` | ${d.energy}`;
+  if (d.estimate) r += `\n⏱ ${d.estimate}p`;
+  if (d.due_date) r += ` | 📅 ${d.due_date}`;
+  if (d.assigned_by) r += `\n👤 ${d.assigned_by}`;
+  r += `\n\n💡 Gõ "plan" để xem ưu tiên.`;
+  return r;
+}
+
+// ─── Main Entry (Engine-First) ───────────────────────────────
+// Phase 1: Regex commands → execute directly (instant, no AI)
+// Phase 2: AI only for natural language capture (ambiguous input)
+export async function processChat(userMessage, env, chatId = 'web') {
+  const { dateContext, dayType, capacity, vnHour } = getVNContext();
+  const msg = userMessage.trim();
+
+  // ═══ PHASE 1: Direct Commands (NO AI call, instant) ═══════
+
+  // DONE BY NUMBER: "done 1", "xong 2"
+  const doneNumMatch = msg.match(/^(?:done|xong)\s+(\d+)$/i);
+  if (doneNumMatch) {
+    const idx = parseInt(doneNumMatch[1]) - 1;
+    const lastPlan = await getLastPlan(chatId, env);
+    if (!lastPlan.length) return buildResult('UPDATE', '❌ Chưa có plan. Gõ "plan" trước rồi "done 1".');
+    if (idx < 0 || idx >= lastPlan.length) return buildResult('UPDATE', `❌ Chỉ có ${lastPlan.length} tasks. Gõ "done 1" đến "done ${lastPlan.length}".`);
+    const result = await updateTaskStatus(lastPlan[idx].title, 'Completed', env);
+    if (!result) return buildResult('UPDATE', `❌ Không tìm thấy "${lastPlan[idx].title}".`);
+    const isFire = (result.urgency || '').includes('Fire');
+    const { xpGained, newAchievements, stats } = await recordCompletion(chatId, env, isFire);
+    return buildResult('UPDATE', buildCompletionResponse(result, xpGained, newAchievements, stats));
+  }
+
+  // DONE BY NAME: "done [name]", "xong [name]"
+  const doneNameMatch = msg.match(/^(?:done|xong|drop)\s+(.+)$/i);
+  if (doneNameMatch) {
+    const result = await updateTaskStatus(doneNameMatch[1].trim(), 'Completed', env);
+    if (!result) return buildResult('UPDATE', `❌ Không tìm thấy "${doneNameMatch[1]}".\n💡 Gõ "plan" để xem danh sách.`);
+    const isFire = (result.urgency || '').includes('Fire');
+    const { xpGained, newAchievements, stats } = await recordCompletion(chatId, env, isFire);
+    return buildResult('UPDATE', buildCompletionResponse(result, xpGained, newAchievements, stats));
+  }
+
+  // PLAN: "plan", "plan today", "hôm nay"
+  if (/^(?:plan\s*(?:today)?|h[oô]m\s*nay|[uư]u\s*ti[eê]n|today)$/i.test(msg)) {
+    const tasks = await queryTasks('today', env);
+    const stats = await getStats(chatId, env);
+    if (tasks.length > 0) await saveLastPlan(chatId, tasks, env);
+    return buildResult('TRIAGE', buildTriageResponse(tasks, stats), tasks.length);
+  }
+
+  // OVERDUE
+  if (/overdue|qu[eê]n|b[oỏ]\s*(?:s[oó]t|qu[eê]n)/i.test(msg)) {
+    const tasks = await queryTasks('overdue', env);
+    return buildResult('OVERDUE_CHECK', buildOverdueResponse(tasks), tasks.length);
+  }
+
+  // LOAD CHECK
+  if (/^(?:check\s*load|load|overload|qu[aá]\s*t[aả]i)$/i.test(msg)) {
+    const tasks = await queryTasks('all_active', env);
+    return buildResult('LOAD_CHECK', buildLoadCheckResponse(tasks), tasks.length);
+  }
+
+  // BACKLOG
+  if (/backlog|c[oó]\s*g[iì]\s*l[aà]m|r[aả]nh|[yý]\s*t[uư][oở]ng/i.test(msg)) {
+    const tasks = await queryTasks('backlog', env);
+    return buildResult('BACKLOG_BROWSE', buildBacklogResponse(tasks), tasks.length);
+  }
+
+  // LIST
+  if (/^(?:list|xem\s*h[eế]t|li[eệ]t\s*k[eê])$/i.test(msg) || /li[eệ]t k[eê]|list\s*task|xem\s*task/i.test(msg)) {
+    const tasks = await queryTasks('all_active', env);
+    return buildResult('LIST_TASKS', buildListResponse(tasks), tasks.length);
+  }
+
+  // DELETE: "xoá [task]"
+  const deleteMatch = msg.match(/^(?:xo[aá]|delete|remove)\s+(.+)$/i);
+  if (deleteMatch) {
+    const archived = await archiveTask(deleteMatch[1].trim(), env);
+    if (!archived) return buildResult('DELETE', `❌ Không tìm thấy "${deleteMatch[1]}".`);
+    return buildResult('DELETE', `🗑️ Đã xoá: "${archived.title}"\n\n💡 Gõ "plan" để xem task còn lại.`);
+  }
+
+  // REPORT
+  if (/^(?:report|summary|b[aá]o\s*c[aá]o)$/i.test(msg)) {
+    const tasks = await queryTasks('weekly_report', env);
+    const stats = await getStats(chatId, env);
+    return buildResult('REPORT', buildReportResponse(tasks, stats));
+  }
+
+  // ═══ PHASE 2: AI-Powered (natural language capture) ═══════
+  const enrichedMessage = `${dateContext}\n${msg}`;
   const history = await getConversation(chatId, env);
   const messages = [
     { role: 'system', content: SYSTEM_PROMPT },
@@ -39,393 +145,125 @@ export async function processChat(userMessage, env, chatId = 'web') {
   ];
 
   const aiResult = await callMiniMax(null, null, env.MINIMAX_API_KEY, messages);
+  const updatedHistory = [...history, { role: 'user', content: enrichedMessage }];
 
-  // Save conversation memory (user + AI response will be saved at end)
-  const updatedHistory = [
-    ...history,
-    { role: 'user', content: enrichedMessage },
-  ];
-
-  // Execute Notion action
   let notionResult = null;
   const action = aiResult.notion_action;
-
-  // ─── Direct intent overrides (bypass AI's notion_action) ──────
-
-  // TRIAGE: "plan today", "hôm nay", "ưu tiên" → query today's tasks from Notion
-  if (!action && /plan\s*today|h[oô]m nay|[uư]u ti[eê]n|today|plan$/i.test(userMessage)) {
-    try {
-      const todayTasks = await queryTasks('today', env);
-      const stats = await getStats(chatId, env);
-      aiResult.response_text = buildTriageResponse(todayTasks, stats);
-      aiResult.intent = 'TRIAGE';
-      notionResult = todayTasks;
-    } catch (err) {
-      console.error('Triage query error:', err);
-    }
-  }
-
-  // OVERDUE: "overdue", "quên", "bỏ sót" → query overdue tasks
-  if (!action && !notionResult && /overdue|qu[eê]n|b[oỏ]\s*s[oó]t|b[oỏ]\s*qu[eê]n/i.test(userMessage)) {
-    try {
-      const overdueTasks = await queryTasks('overdue', env);
-      aiResult.response_text = buildOverdueResponse(overdueTasks);
-      aiResult.intent = 'OVERDUE_CHECK';
-      notionResult = overdueTasks;
-    } catch (err) {
-      console.error('Overdue query error:', err);
-    }
-  }
-
-  // LOAD_CHECK: "check load", "overload", "quá tải"
-  if (!action && !notionResult && /check\s*load|overload|qu[aá]\s*t[aả]i/i.test(userMessage)) {
-    try {
-      const activeTasks = await queryTasks('all_active', env);
-      aiResult.response_text = buildLoadCheckResponse(activeTasks);
-      aiResult.intent = 'LOAD_CHECK';
-      notionResult = activeTasks;
-    } catch (err) {
-      console.error('Load check error:', err);
-    }
-  }
-
-  // BACKLOG: "backlog", "có gì làm không", "rảnh", "pick"
-  if (!action && !notionResult && /backlog|c[oó]\s*g[iì]\s*l[aà]m|r[aả]nh|pick|[yý]\s*t[uư][oở]ng/i.test(userMessage)) {
-    try {
-      const backlogTasks = await queryTasks('backlog', env);
-      aiResult.response_text = buildBacklogResponse(backlogTasks);
-      aiResult.intent = 'BACKLOG_BROWSE';
-      notionResult = backlogTasks;
-    } catch (err) {
-      console.error('Backlog query error:', err);
-    }
-  }
-
-  // LIST_TASKS: When AI returns LIST_TASKS intent, always query Notion directly
-  if (aiResult.intent === 'LIST_TASKS' || (!action && !notionResult && /li[eệ]t k[eê]|list\s*task|xem\s*task|task\s*ch[uư]a\s*[đd][oó]ng|task\s*[đd]ang\s*m[oở]|xem\s*h[eế]t/i.test(userMessage))) {
-    try {
-      const activeTasks = await queryTasks('all_active', env);
-      if (!activeTasks || activeTasks.length === 0) {
-        aiResult.response_text = '✨ Không có task nào đang mở!\n\n💡 Gõ task mới để bắt đầu.';
-      } else {
-        const grouped = {};
-        activeTasks.forEach(t => {
-          const st = t.status || 'To do';
-          if (!grouped[st]) grouped[st] = [];
-          grouped[st].push(t);
-        });
-        const statusIcons = { 'In progress': '🔥', 'To do': '📋', 'Pending / Wait for approved': '⏳' };
-        let lines = [`📊 **${activeTasks.length} tasks đang mở:**\n`];
-        for (const [status, tasks] of Object.entries(grouped)) {
-          const icon = statusIcons[status] || '📌';
-          lines.push(`${icon} **${status}** (${tasks.length})`);
-          tasks.forEach((t, i) => {
-            const project = t.project ? ` [${t.project}]` : '';
-            const urgency = t.urgency ? ` ${t.urgency}` : '';
-            const deadline = t.due_date ? ` ⏰${t.due_date}` : '';
-            lines.push(`  ${i + 1}. ${t.title}${project}${urgency}${deadline}`);
-          });
-          lines.push('');
-        }
-        lines.push('💡 Gõ "xoá [tên]" để xoá, "plan" để sắp xếp.');
-        aiResult.response_text = lines.join('\n');
-      }
-      aiResult.intent = 'LIST_TASKS';
-    } catch (err) {
-      console.error('List tasks error:', err);
-      aiResult.response_text += `\n\n⚠️ Lỗi query: ${err.message}`;
-    }
-  }
-
-  // ─── Safety net: CAPTURE without notion_action ──────────────
-  // AI sometimes returns plain text instead of JSON for CAPTURE
-  const captureIntents = ['CAPTURE', 'CAPTURE_BATCH', 'CAPTURE_SPLIT'];
-  if (captureIntents.includes(aiResult.intent) && !action) {
-    console.warn('AI returned CAPTURE intent without notion_action, attempting fallback parse');
-    // Try to create task from AI's response text (it usually contains the parsed data)
-    const fallbackTask = tryParseCaptureFromAIResponse(aiResult.response_text, userMessage);
-    if (fallbackTask) {
-      try {
-        notionResult = await createTask(fallbackTask, env);
-        if (notionResult) {
-          const d = fallbackTask;
-          let confirmMsg = `✅ Đã tạo task:\n📌 ${d.title || 'Untitled'}`;
-          if (d.project) confirmMsg += `\n📂 ${d.project}`;
-          if (d.urgency) confirmMsg += ` | ${d.urgency}`;
-          if (d.energy) confirmMsg += ` | ${d.energy}`;
-          if (d.estimate) confirmMsg += `\n⏱ ${d.estimate}p`;
-          if (d.due_date) confirmMsg += ` | 📅 ${d.due_date}`;
-          if (d.assigned_by) confirmMsg += `\n👤 ${d.assigned_by}`;
-          confirmMsg += `\n\n💡 Gõ "plan" để xem ưu tiên.`;
-          aiResult.response_text = confirmMsg;
-        }
-      } catch (err) {
-        console.error('Capture fallback error:', err);
-        aiResult.response_text = '⚠️ **Lỗi hệ thống**: Không tạo được task.\n\n' +
-          `💡 Lỗi: ${err.message}\nThử lại hoặc gõ rõ hơn.`;
-      }
-    } else {
-      aiResult.response_text = '⚠️ **Lỗi hệ thống**: AI không gửi đúng data để tạo task.\n\n' +
-        '💡 Thử lại: gõ rõ từng task, VD:\n' +
-        '"Review deck GMA deadline 20/5"\n' +
-        'hoặc gửi nhiều task:\n' +
-        '"task1, task2, task3"';
-    }
-  }
-
-  // ─── CAPTURE fallback for CLARIFY intent with task-like content ──────
-  // AI returned CLARIFY but user clearly wanted to create a task AND AI's response shows it parsed correctly
-  if (!action && aiResult.intent === 'CLARIFY' && !notionResult &&
-      /t[aạ]o|capture|th[eê]m|add/i.test(userMessage) &&
-      /đ[aã] t[aạ]o|📌/i.test(aiResult.response_text)) {
-    const fallbackTask = tryParseCaptureFromAIResponse(aiResult.response_text, userMessage);
-    if (fallbackTask) {
-      try {
-        notionResult = await createTask(fallbackTask, env);
-        if (notionResult) {
-          const d = fallbackTask;
-          let confirmMsg = `✅ Đã tạo task:\n📌 ${d.title || 'Untitled'}`;
-          if (d.project) confirmMsg += `\n📂 ${d.project}`;
-          if (d.urgency) confirmMsg += ` | ${d.urgency}`;
-          if (d.energy) confirmMsg += ` | ${d.energy}`;
-          if (d.estimate) confirmMsg += `\n⏱ ${d.estimate}p`;
-          if (d.due_date) confirmMsg += ` | 📅 ${d.due_date}`;
-          if (d.assigned_by) confirmMsg += `\n👤 ${d.assigned_by}`;
-          confirmMsg += `\n\n💡 Gõ "plan" để xem ưu tiên.`;
-          aiResult.response_text = confirmMsg;
-          aiResult.intent = 'CAPTURE';
-        }
-      } catch (err) {
-        console.error('Capture CLARIFY fallback error:', err);
-      }
-    }
-  }
-
-  // ─── EDIT fallback: AI returned plain text instead of JSON ──────
-  // Detect EDIT intent from user message when AI failed to return notion_action
-  if (!action && /s[uử]a|edit|change|[đd][ổo]i|update|c[aậ]p nh[aậ]t|stakeholder|assigned|giao cho/i.test(userMessage)) {
-    const editFallback = tryParseEditFromMessage(userMessage, aiResult.response_text);
-    if (editFallback) {
-      try {
-        const editResult = await editTask(editFallback.task_title, editFallback.updates, env);
-        if (editResult) {
-          notionResult = editResult;
-          const changes = Object.entries(editFallback.updates).map(([k, v]) => `  • ${k}: ${v}`).join('\n');
-          aiResult.response_text = `✏️ Đã sửa "${editResult.title}":\n${changes}\n\n💡 Gõ "plan" để xem lại.`;
-          aiResult.intent = 'EDIT';
-        }
-      } catch (err) {
-        console.error('Edit fallback error:', err);
-      }
-    }
-  }
+  let responseText = aiResult.response_text || '';
 
   if (action) {
     try {
       switch (action.type) {
-        case 'create':
-          // If intent is CAPTURE_SPLIT, handle parent + subtasks together
+        case 'create': {
+          const taskData = action.data || {};
           if (aiResult.intent === 'CAPTURE_SPLIT' && action.data?.parent && action.data?.subtasks) {
-            const parent = await createTask(action.data.parent, env);
+            await createTask(action.data.parent, env);
             for (const sub of action.data.subtasks) {
-              await createTask({
-                ...sub,
-                project: action.data.parent.project,
-                urgency: action.data.parent.urgency,
-                source: action.data.parent.source,
-                context: `Sub-task of: ${action.data.parent.title}`,
-              }, env);
+              await createTask({ ...sub, project: action.data.parent.project, urgency: action.data.parent.urgency, source: action.data.parent.source }, env);
             }
-            notionResult = parent;
-            aiResult.response_text = `✅ Đã tạo + chia nhỏ:\n📌 ${action.data.parent.title}\n📦 ${action.data.subtasks.length} sub-tasks\n\n💡 Gõ "plan" để xem.`;
+            notionResult = true;
+            responseText = `✅ Đã tạo + chia nhỏ:\n📌 ${action.data.parent.title}\n📦 ${action.data.subtasks.length} sub-tasks\n\n💡 Gõ "plan" để xem.`;
           } else {
-            notionResult = await createTask(action.data, env);
-            // Build confirmation response after successful creation
-            if (notionResult) {
-              const d = action.data;
-              let confirmMsg = `✅ Đã tạo task:\n📌 ${d.title || 'Untitled'}`;
-              if (d.project) confirmMsg += `\n📂 ${d.project}`;
-              if (d.urgency) confirmMsg += ` | ${d.urgency}`;
-              if (d.energy) confirmMsg += ` | ${d.energy}`;
-              if (d.estimate) confirmMsg += `\n⏱ ${d.estimate}p`;
-              if (d.due_date) confirmMsg += ` | 📅 ${d.due_date}`;
-              if (d.block) confirmMsg += ` | ${d.block}`;
-              if (d.assigned_by) confirmMsg += `\n👤 ${d.assigned_by}`;
-              if (d.source) confirmMsg += ` | ${d.source}`;
-              confirmMsg += `\n\n💡 Gõ "plan" để xem ưu tiên.`;
-              aiResult.response_text = confirmMsg;
+            notionResult = await createTask(taskData, env);
+            responseText = buildCaptureConfirmation(taskData);
+            // 2-MINUTE RULE
+            if ((taskData.estimate || 30) <= 5) {
+              const todayTasks = await queryTasks('today', env);
+              const inProgress = todayTasks.filter(t => t.status === 'In progress');
+              if (inProgress.length === 0) {
+                responseText += `\n\n⚡ Chỉ ${taskData.estimate || 5}p — làm luôn đi! Gõ "done ${taskData.title?.split(' ').slice(0, 2).join(' ')}" khi xong.`;
+              } else {
+                responseText += `\n\n💡 Đang focus [${inProgress[0].title}] — pick sau khi xong!`;
+              }
+            }
+            // CONTEXT SWITCH WARNING
+            if ((taskData.estimate || 30) > 5) {
+              const todayTasks = await queryTasks('today', env);
+              const inProgress = todayTasks.filter(t => t.status === 'In progress');
+              if (inProgress.length > 0) {
+                responseText += `\n\n⚡ Đang có "${inProgress[0].title}" in progress. Finish trước hay switch?`;
+              }
             }
           }
-          break;
-
-        case 'create_batch': {
-          const tasks = action.data?.tasks || [];
-          const created = [];
-          for (const t of tasks) {
-            await createTask(t, env);
-            created.push(t);
-          }
-          const { newAchievements, stats } = await recordBatch(chatId, env, created.length);
-          aiResult.response_text = buildBatchResponse(created, stats, newAchievements);
           break;
         }
-
+        case 'create_batch': {
+          const tasks = action.data?.tasks || [];
+          for (const t of tasks) await createTask(t, env);
+          const { newAchievements, stats } = await recordBatch(chatId, env, tasks.length);
+          notionResult = true;
+          responseText = buildBatchResponse(tasks, stats, newAchievements);
+          break;
+        }
+        case 'update':
+          if (action.data?.task_title && action.data?.new_status) {
+            notionResult = await updateTaskStatus(action.data.task_title, action.data.new_status, env);
+            if (!notionResult) { responseText = `❌ Không tìm thấy "${action.data.task_title}".`; }
+            else {
+              const isFire = (notionResult.urgency || '').includes('Fire');
+              const { xpGained, newAchievements, stats } = await recordCompletion(chatId, env, isFire);
+              responseText = buildCompletionResponse(notionResult, xpGained, newAchievements, stats);
+            }
+          }
+          break;
+        case 'edit':
+          if (action.data?.task_title && action.data?.updates) {
+            notionResult = await editTask(action.data.task_title, action.data.updates, env);
+            if (!notionResult) { responseText = `❌ Không tìm thấy "${action.data.task_title}".`; }
+            else {
+              const changes = Object.entries(action.data.updates).map(([k, v]) => `  • ${k}: ${v}`).join('\n');
+              responseText = `✏️ Đã sửa "${notionResult.title}":\n${changes}\n\n💡 Gõ "plan" để xem lại.`;
+            }
+          }
+          break;
+        case 'delete':
+          if (action.data?.task_title) {
+            const archived = await archiveTask(action.data.task_title, env);
+            responseText = archived ? `🗑️ Đã xoá: "${archived.title}"` : `❌ Không tìm thấy "${action.data.task_title}".`;
+          }
+          break;
         case 'query':
           notionResult = await queryTasks(action.data?.query_type || 'today', env);
           if (Array.isArray(notionResult)) {
             const stats = await getStats(chatId, env);
-            switch (aiResult.intent) {
-              case 'TRIAGE':
-                aiResult.response_text = buildTriageResponse(notionResult, stats);
-                break;
-              case 'OVERDUE_CHECK':
-                aiResult.response_text = buildOverdueResponse(notionResult);
-                break;
-              case 'LOAD_CHECK':
-                aiResult.response_text = buildLoadCheckResponse(notionResult);
-                break;
-              case 'REPORT':
-                aiResult.response_text = buildReportResponse(notionResult, stats);
-                break;
-              case 'BACKLOG_BROWSE':
-                aiResult.response_text = buildBacklogResponse(notionResult);
-                break;
-            }
+            if (aiResult.intent === 'TRIAGE') responseText = buildTriageResponse(notionResult, stats);
+            else if (aiResult.intent === 'OVERDUE_CHECK') responseText = buildOverdueResponse(notionResult);
+            else if (aiResult.intent === 'LOAD_CHECK') responseText = buildLoadCheckResponse(notionResult);
+            else if (aiResult.intent === 'REPORT') responseText = buildReportResponse(notionResult, stats);
+            else if (aiResult.intent === 'BACKLOG_BROWSE') responseText = buildBacklogResponse(notionResult);
           }
           break;
-
-        case 'update':
-          if (action.data?.task_title && action.data?.new_status) {
-            notionResult = await updateTaskStatus(action.data.task_title, action.data.new_status, env);
-            if (!notionResult) {
-              aiResult.response_text = `❌ Không tìm thấy "${action.data.task_title}".\n💡 Gõ chính xác hơn.`;
-            } else {
-              const isFire = (notionResult.urgency || '').includes('Fire');
-              const { xpGained, newAchievements, stats } = await recordCompletion(chatId, env, isFire);
-              aiResult.response_text = buildCompletionResponse(notionResult, xpGained, newAchievements, stats);
-            }
-          }
-          break;
-
-        case 'edit':
-          if (action.data?.task_title && action.data?.updates) {
-            notionResult = await editTask(action.data.task_title, action.data.updates, env);
-            if (!notionResult) {
-              aiResult.response_text = `❌ Không tìm thấy "${action.data.task_title}".\n💡 Gõ chính xác hơn.`;
-            } else {
-              const changes = Object.entries(action.data.updates).map(([k, v]) => `  • ${k}: ${v}`).join('\n');
-              aiResult.response_text = `✏️ Đã sửa "${notionResult.title}":\n${changes}\n\n💡 Gõ "plan" để xem lại.`;
-            }
-          }
-          break;
-
-        case 'delete':
-          if (action.data?.task_title) {
-            const archived = await archiveTask(action.data.task_title, env);
-            if (!archived) {
-              aiResult.response_text = `❌ Không tìm thấy "${action.data.task_title}".\n💡 Gõ chính xác hơn hoặc "dọn dẹp" để xem danh sách.`;
-            } else {
-              aiResult.response_text = `🗑️ Đã xoá: "${archived.title}"\n\n💡 Gõ "plan" để xem task còn lại.`;
-            }
-          }
-          break;
-
-        case 'cleanup':
-          const allTasks = await listAllTasks(env);
-          if (allTasks.length === 0) {
-            aiResult.response_text = '✨ Database trống. Không có gì để dọn!';
-          } else {
-            const taskList = allTasks.map((t, i) => {
-              const status = t.status || 'Unknown';
-              const urgency = t.urgency ? ` | ${t.urgency}` : '';
-              return `${i + 1}. ${t.title} [${status}${urgency}]`;
-            }).join('\n');
-            aiResult.response_text = `🧹 **Dọn dẹp** — ${allTasks.length} tasks:\n\n${taskList}\n\n💡 Gõ "xoá [tên task]" để xoá từng cái, hoặc "xoá completed" để xoá hết task đã xong.`;
-          }
-          break;
-
-        case 'list': {
-          const activeTasks = await queryTasks('all_active', env);
-          if (!activeTasks || activeTasks.length === 0) {
-            aiResult.response_text = '✨ Không có task nào đang mở!\n\n💡 Gõ task mới để bắt đầu.';
-          } else {
-            // Group by status
-            const grouped = {};
-            activeTasks.forEach(t => {
-              const st = t.status || 'To do';
-              if (!grouped[st]) grouped[st] = [];
-              grouped[st].push(t);
-            });
-
-            const statusIcons = { 'In progress': '🔥', 'To do': '📋', 'Pending / Wait for approved': '⏳' };
-            let lines = [`📊 **${activeTasks.length} tasks đang mở:**\n`];
-
-            for (const [status, tasks] of Object.entries(grouped)) {
-              const icon = statusIcons[status] || '📌';
-              lines.push(`${icon} **${status}** (${tasks.length})`);
-              tasks.forEach((t, i) => {
-                const project = t.project ? ` [${t.project}]` : '';
-                const urgency = t.urgency ? ` ${t.urgency}` : '';
-                const deadline = t.due_date ? ` ⏰${t.due_date}` : '';
-                lines.push(`  ${i + 1}. ${t.title}${project}${urgency}${deadline}`);
-              });
-              lines.push('');
-            }
-
-            lines.push('💡 Gõ "sắp xếp" hoặc "plan" để tổ chức lại.');
-            aiResult.response_text = lines.join('\n');
-          }
-          break;
-        }
-      }
-
-      // Handle CAPTURE_SPLIT — only if action.type is NOT 'create' (avoid duplicate)
-      if (aiResult.intent === 'CAPTURE_SPLIT' && action.type !== 'create' && action.data?.parent && action.data?.subtasks) {
-        const parent = await createTask(action.data.parent, env);
-        for (const sub of action.data.subtasks) {
-          await createTask({
-            ...sub,
-            project: action.data.parent.project,
-            urgency: action.data.parent.urgency,
-            source: action.data.parent.source,
-            context: `Sub-task of: ${action.data.parent.title}`,
-          }, env);
-        }
-        notionResult = parent;
-        aiResult.response_text = `✅ Đã tạo + chia nhỏ:\n📌 ${action.data.parent.title}\n📦 ${action.data.subtasks.length} sub-tasks\n\n💡 Gõ "plan" để xem.`;
       }
     } catch (err) {
       console.error('Notion error:', err);
-      aiResult.response_text += `\n\n⚠️ Lỗi: ${err.message}`;
+      responseText += `\n\n⚠️ Lỗi: ${err.message}`;
     }
   }
 
-  // ─── Final guard: strip hallucinated "đã tạo" claims ──────
-  // If no Notion write happened but AI claims success, strip the lie
-  // Skip if we already handled via fallback (notionResult is set)
-  if (!notionResult && !captureIntents.includes(aiResult.intent) &&
-      aiResult.intent !== 'EDIT' &&
-      /đã tạo|đã capture|đã lưu|created|saved/i.test(aiResult.response_text)) {
-    // Check if this was supposed to be a capture
-    if (/task|tạo|capture|thêm|add/i.test(userMessage)) {
-      aiResult.response_text += '\n\n⚠️ **Lưu ý**: Task chưa được lưu vào Notion. Gõ lại rõ hơn để tạo thật.';
+  // ─── Fallbacks when AI returns plain text ──────────────────
+  if (!action && !notionResult) {
+    if (/📌|📋|Task:|đ[aã]\s*t[aạ]o|captured/i.test(responseText) && /t[aạ]o|capture|th[eê]m|add|task/i.test(responseText + msg)) {
+      const fallbackTask = tryParseCaptureFromAIResponse(responseText, msg);
+      if (fallbackTask) {
+        try { notionResult = await createTask(fallbackTask, env); responseText = buildCaptureConfirmation(fallbackTask); } catch {}
+      }
+    }
+    if (!notionResult && /s[uử]a|edit|[đd][ổo]i|update|stakeholder|assigned/i.test(msg)) {
+      const editFb = tryParseEditFromMessage(msg, responseText);
+      if (editFb) {
+        try {
+          const r = await editTask(editFb.task_title, editFb.updates, env);
+          if (r) { notionResult = r; responseText = `✏️ Đã sửa "${r.title}":\n${Object.entries(editFb.updates).map(([k,v])=>`  • ${k}: ${v}`).join('\n')}\n\n💡 Gõ "plan" để xem lại.`; }
+        } catch {}
+      }
     }
   }
 
-  // ─── Save conversation memory ──────────────────────────────
-  const finalHistory = [
-    ...updatedHistory,
-    { role: 'assistant', content: aiResult.response_text || '' },
-  ];
+  // Save memory
+  const finalHistory = [...updatedHistory, { role: 'assistant', content: responseText }];
   await saveConversation(chatId, finalHistory, env);
 
-  return {
-    intent: aiResult.intent,
-    response_text: aiResult.response_text,
-    needs_confirmation: aiResult.needs_confirmation || false,
-    follow_up_question: aiResult.follow_up_question || null,
-    task_count: Array.isArray(notionResult) ? notionResult.length : undefined,
-  };
+  return buildResult(aiResult.intent || 'CLARIFY', responseText, Array.isArray(notionResult) ? notionResult.length : undefined);
 }
 
 // ─── Context ─────────────────────────────────────────
@@ -492,8 +330,8 @@ function buildTriageResponse(tasks, stats) {
   // Summary of remaining
   if (tasks.length > 1) {
     r += `📋 +${tasks.length - 1} task nữa:`;
-    tasks.slice(1, 4).forEach(t => {
-      r += `\n  • ${t.urgency || '🟡'} ${t.title}`;
+    tasks.slice(1, 4).forEach((t, i) => {
+      r += `\n  ${i + 2}. ${t.urgency || '🟡'} ${t.title}`;
     });
     if (tasks.length > 4) r += `\n  ... +${tasks.length - 4} nữa`;
     r += '\n';
@@ -501,7 +339,7 @@ function buildTriageResponse(tasks, stats) {
 
   r += `\n${buildLoadBar(loadPct)}`;
   r += buildStatsFooter(stats);
-  r += `\n\n💡 Gõ "done ${next?.title?.split(' ').slice(0, 3).join(' ') || 'task'}" hoặc "xem hết"`;
+  r += `\n\n💡 Gõ "done 1" để hoàn thành task đầu, hoặc "xem hết"`;
 
   return r;
 }
@@ -623,6 +461,26 @@ function buildBacklogResponse(tasks) {
   }
   r += '💡 Gõ "pick [tên]" để chuyển thành task active.';
   return r;
+}
+
+function buildListResponse(tasks) {
+  if (!tasks || !tasks.length) return '✨ Không có task nào đang mở!\n\n💡 Gõ task mới để bắt đầu.';
+  const grouped = {};
+  tasks.forEach(t => { const st = t.status || 'To do'; if (!grouped[st]) grouped[st] = []; grouped[st].push(t); });
+  const icons = { 'In progress': '🔥', 'To do': '📋', 'Pending / Wait for approved': '⏳' };
+  let lines = [`📊 **${tasks.length} tasks đang mở:**\n`];
+  for (const [status, items] of Object.entries(grouped)) {
+    lines.push(`${icons[status] || '📌'} **${status}** (${items.length})`);
+    items.forEach((t, i) => {
+      const p = t.project ? ` [${t.project}]` : '';
+      const u = t.urgency ? ` ${t.urgency}` : '';
+      const d = t.due_date ? ` ⏰${t.due_date}` : '';
+      lines.push(`  ${i + 1}. ${t.title}${p}${u}${d}`);
+    });
+    lines.push('');
+  }
+  lines.push('💡 Gõ "done [tên]" hoặc "plan" để focus.');
+  return lines.join('\n');
 }
 
 // ─── Edit Fallback Parser ─────────────────────────────────────
@@ -760,8 +618,8 @@ function tryParseEditFromMessage(userMessage, aiResponse) {
 function tryParseCaptureFromAIResponse(aiResponse, userMessage) {
   if (!aiResponse) return null;
 
-  // Extract title from 📌 line
-  const titleMatch = aiResponse.match(/📌\s*(.+?)(?:\n|$)/);
+  // Extract title from 📌 or 📋 Task: line
+  const titleMatch = aiResponse.match(/(?:📌|📋)\s*(?:Task:\s*)?(.+?)(?:\s*\||\n|$)/);
   if (!titleMatch) return null;
 
   const title = titleMatch[1].trim();
