@@ -155,10 +155,13 @@ export async function queryTasks(queryType, env) {
       break;
 
     case 'weekly_report':
-      // Completed tasks
+      // Completed tasks this week (last 7 days)
+      const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
       filter = {
-        property: 'State',
-        status: { equals: 'Completed' },
+        and: [
+          { property: 'State', status: { equals: 'Completed' } },
+          { property: 'Deadline', date: { on_or_after: weekAgo } },
+        ],
       };
       break;
 

@@ -62,10 +62,11 @@ async function checkAuth() {
   try {
     const res = await fetch('/api/health');
     if (res.ok) {
+      // Check if we have a valid auth cookie by hitting chat endpoint with a lightweight check
       const chatRes = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: 'health' }),
+        body: JSON.stringify({ message: '__ping__' }),
       });
       if (chatRes.status !== 401) {
         showChat();

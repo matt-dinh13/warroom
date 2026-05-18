@@ -40,12 +40,11 @@ export async function processChat(userMessage, env, chatId = 'web') {
 
   const aiResult = await callMiniMax(null, null, env.MINIMAX_API_KEY, messages);
 
-  // Save to memory
-  history.push(
-    { role: 'user', content: userMessage },
-    { role: 'assistant', content: aiResult.response_text || '' }
-  );
-  await saveConversation(chatId, history, env);
+  // Save conversation memory (user + AI response will be saved at end)
+  const updatedHistory = [
+    ...history,
+    { role: 'user', content: enrichedMessage },
+  ];
 
   // Execute Notion action
   let notionResult = null;
@@ -73,7 +72,7 @@ export async function processChat(userMessage, env, chatId = 'web') {
           tasks.forEach((t, i) => {
             const project = t.project ? ` [${t.project}]` : '';
             const urgency = t.urgency ? ` ${t.urgency}` : '';
-            const deadline = t.deadline ? ` ⏰${t.deadline}` : '';
+            const deadline = t.due_date ? ` ⏰${t.due_date}` : '';
             lines.push(`  ${i + 1}. ${t.title}${project}${urgency}${deadline}`);
           });
           lines.push('');
@@ -104,7 +103,23 @@ export async function processChat(userMessage, env, chatId = 'web') {
     try {
       switch (action.type) {
         case 'create':
-          notionResult = await createTask(action.data, env);
+          // If intent is CAPTURE_SPLIT, handle parent + subtasks together
+          if (aiResult.intent === 'CAPTURE_SPLIT' && action.data?.parent && action.data?.subtasks) {
+            const parent = await createTask(action.data.parent, env);
+            for (const sub of action.data.subtasks) {
+              await createTask({
+                ...sub,
+                project: action.data.parent.project,
+                urgency: action.data.parent.urgency,
+                source: action.data.parent.source,
+                context: `Sub-task of: ${action.data.parent.title}`,
+              }, env);
+            }
+            notionResult = parent;
+            aiResult.response_text = `✅ Đã tạo + chia nhỏ:\n📌 ${action.data.parent.title}\n📦 ${action.data.subtasks.length} sub-tasks\n\n💡 Gõ "plan" để xem.`;
+          } else {
+            notionResult = await createTask(action.data, env);
+          }
           break;
 
         case 'create_batch': {
@@ -215,7 +230,7 @@ export async function processChat(userMessage, env, chatId = 'web') {
               tasks.forEach((t, i) => {
                 const project = t.project ? ` [${t.project}]` : '';
                 const urgency = t.urgency ? ` ${t.urgency}` : '';
-                const deadline = t.deadline ? ` ⏰${t.deadline}` : '';
+                const deadline = t.due_date ? ` ⏰${t.due_date}` : '';
                 lines.push(`  ${i + 1}. ${t.title}${project}${urgency}${deadline}`);
               });
               lines.push('');
@@ -228,8 +243,8 @@ export async function processChat(userMessage, env, chatId = 'web') {
         }
       }
 
-      // Handle CAPTURE_SPLIT
-      if (aiResult.intent === 'CAPTURE_SPLIT' && action.data?.parent && action.data?.subtasks) {
+      // Handle CAPTURE_SPLIT — only if action.type is NOT 'create' (avoid duplicate)
+      if (aiResult.intent === 'CAPTURE_SPLIT' && action.type !== 'create' && action.data?.parent && action.data?.subtasks) {
         const parent = await createTask(action.data.parent, env);
         for (const sub of action.data.subtasks) {
           await createTask({
@@ -240,6 +255,7 @@ export async function processChat(userMessage, env, chatId = 'web') {
             context: `Sub-task of: ${action.data.parent.title}`,
           }, env);
         }
+        notionResult = parent;
         aiResult.response_text = `✅ Đã tạo + chia nhỏ:\n📌 ${action.data.parent.title}\n📦 ${action.data.subtasks.length} sub-tasks\n\n💡 Gõ "plan" để xem.`;
       }
     } catch (err) {
@@ -257,6 +273,13 @@ export async function processChat(userMessage, env, chatId = 'web') {
       aiResult.response_text += '\n\n⚠️ **Lưu ý**: Task chưa được lưu vào Notion. Gõ lại rõ hơn để tạo thật.';
     }
   }
+
+  // ─── Save conversation memory ──────────────────────────────
+  const finalHistory = [
+    ...updatedHistory,
+    { role: 'assistant', content: aiResult.response_text || '' },
+  ];
+  await saveConversation(chatId, finalHistory, env);
 
   return {
     intent: aiResult.intent,

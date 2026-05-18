@@ -221,9 +221,11 @@ npx wrangler tail
 1. **No "Dropped" status** — DB only has "Completed". All done/dropped → Completed.
 2. **Day type detection** — Hardcoded: Friday = WFH, others = Office, weekend = 120min.
 3. **Single user** — No multi-user support, single shared password.
-4. **KV Memory TTL** — Conversation context expires after 1 hour of inactivity.
+4. **KV Memory TTL** — Conversation context expires after 24 hours of inactivity.
 5. **5 cron limit** — CF free plan. Consolidated via internal dispatch.
 6. **CN cron** — Sunday shares T7 cron trigger; dispatch handles separately.
+7. **Rate limiter per-isolate** — Resets when Worker isolate recycles. Acceptable for single-user.
+8. **Notion pagination** — Max 100 tasks per query. No `has_more` handling.
 
 ---
 
@@ -240,3 +242,4 @@ npx wrangler tail
 | 3.1 | 2026-05-18 | Rebrand: War Room → Stratt. DELETE/CLEANUP commands. New domain: stratt.rocky13.workers.dev |
 | 3.2 | 2026-05-18 | LIST_TASKS intent + regex fallback. AI CAPABILITIES section. Telegram format fix (MD→HTML, strip JSON). Anti-hallucination guards (CAPTURE safety net). Do Date sync. Password: HailMary13 |
 | 3.3 | 2026-05-18 | Robust JSON parser (multi-strategy extraction). Memory TTL 1h→24h. Cleaned 25 duplicate tasks. |
+| 3.4 | 2026-05-18 | Bug fixes: conversation memory save, auth ping shortcircuit, weekly report date filter, CAPTURE_SPLIT duplicate fix, t.deadline→t.due_date field name fix |

@@ -114,6 +114,14 @@ export default {
             );
           }
 
+          // Lightweight auth check — don't call AI for ping
+          if (message === '__ping__') {
+            return new Response(
+              JSON.stringify({ intent: 'PING', response_text: 'pong' }),
+              { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+
           const result = await processChat(message, env, 'web');
 
           // Security: sanitize before sending to client

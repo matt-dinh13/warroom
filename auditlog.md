@@ -432,31 +432,49 @@ Each strategy validates the parsed object has `intent` field before accepting.
 
 ---
 
-## Template for Future Entries
-
-```markdown
-## YYYY-MM-DD — [Title]
+## 2026-05-18 — Bug Fixes (v3.4)
 
 ### Scope
-Brief description of what was done.
+Code review + fix 5 bugs found across triage, notion, frontend, and index.
 
-### Changes Made
-- File changes with rationale
+### Bugs Fixed
+
+| # | Bug | Severity | File | Fix |
+|---|-----|----------|------|-----|
+| 1 | Conversation memory never saved | CRITICAL | `src/triage.js` | Added `saveConversation()` at end of `processChat()` — saves both user msg + AI response |
+| 2 | `checkAuth` calls MiniMax API just to verify login | HIGH | `public/app.js` + `src/index.js` | Frontend sends `__ping__` → backend short-circuits with `{intent:"PING"}`, no AI call |
+| 3 | `weekly_report` returns ALL completed tasks ever | MEDIUM | `src/notion.js` | Added `Deadline on_or_after` filter (last 7 days) |
+| 4 | CAPTURE_SPLIT creates duplicate parent task | MEDIUM | `src/triage.js` | Handle CAPTURE_SPLIT inside `case 'create'` when intent matches; guard on fallback block |
+| 5 | `t.deadline` undefined in LIST_TASKS display | LOW | `src/triage.js` | Changed to `t.due_date` (correct field from `parseNotionTask`) |
 
 ### Technical Decisions
-#### DN: [Decision Title]
-- **Decision:** What was decided
-- **Reason:** Why
-- **Impact:** What changed as a result
+
+#### D20: Auth Ping Pattern
+- **Decision:** `__ping__` message → immediate `{intent:"PING", response_text:"pong"}` without AI
+- **Reason:** Frontend called `/api/chat` with "health" message on every page load → wasted MiniMax API credits
+- **Impact:** Page load no longer triggers AI call; auth check is instant
+
+#### D21: Memory Save Strategy
+- **Decision:** Save conversation AFTER all processing (Notion actions + response building)
+- **Reason:** Ensures the saved AI response reflects the final text (after overrides/guards)
+- **Impact:** Multi-turn conversations now work correctly; AI remembers previous context
 
 ### Verification Results
+
 | Test | Result | Notes |
 |------|--------|-------|
+| `wrangler dev` build | ✅ Pass | No errors |
+| Health endpoint | ✅ Pass | 200 OK |
+| Auth (wrong password) | ✅ Pass | 401 |
+| Auth (correct password) | ✅ Pass | Cookie set |
+| `__ping__` (authenticated) | ✅ Pass | Instant response, no AI call |
+| `__ping__` (unauthenticated) | ✅ Pass | 401 |
+| "plan today" | ✅ Pass | Full pipeline: AI → Notion → response |
+| "overdue" (2nd message) | ✅ Pass | Memory working (context preserved) |
 
-### Notes
-Any additional context.
-```
+---
 
+## Template for Future Entries
 
 ```markdown
 ## YYYY-MM-DD — [Title]
