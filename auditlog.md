@@ -363,6 +363,28 @@ MiniMax AI didn't know it had Notion query capability → responded "mình khôn
 
 ---
 
+## 2026-05-18 — Telegram Format Fix (v3.2b)
+
+### Scope
+Fix Telegram messages showing raw JSON and unformatted Markdown.
+
+### Root Cause
+1. AI sometimes returned raw JSON inside `response_text` → dumped to Telegram
+2. Response builders used Markdown `**bold**` but Telegram expects `<b>bold</b>` HTML
+3. No spacing between sections → wall of text
+
+### Fix
+Added `formatForTelegram()` function in `telegram.js`:
+- Strips raw JSON blocks and standalone JSON objects
+- Escapes HTML special chars (`<`, `>`, `&`)
+- Converts Markdown `**bold**` → `<b>bold</b>` and `*italic*` → `<i>italic</i>`
+- Adds line breaks before major emoji headers for readability
+- Truncates at 4000 chars (Telegram limit: 4096)
+
+Applied to both direct message and callback_query handlers.
+
+---
+
 ## Template for Future Entries
 
 ```markdown

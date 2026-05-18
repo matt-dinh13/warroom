@@ -63,7 +63,7 @@ export async function handleTelegramWebhook(update, env, processChat) {
     let responseText = result.response_text || 'Không có response.';
     if (result.follow_up_question) responseText += `\n\n❓ ${result.follow_up_question}`;
 
-    await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, responseText, 'HTML',
+    await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, formatForTelegram(responseText), 'HTML',
       buildMainKeyboard()
     );
   } catch (err) {
@@ -106,7 +106,7 @@ async function handleCallbackQuery(query, env, processChat) {
   try {
     const result = await processChat(chatMessage, env, String(chatId));
     await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,
-      result.response_text || 'Không có response.', 'HTML', buildMainKeyboard()
+      formatForTelegram(result.response_text || 'Không có response.'), 'HTML', buildMainKeyboard()
     );
   } catch (err) {
     await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,
@@ -115,6 +115,48 @@ async function handleCallbackQuery(query, env, processChat) {
   }
 
   return new Response('OK');
+}
+
+/**
+ * Convert Markdown response → Telegram HTML, strip JSON dumps, improve spacing
+ */
+function formatForTelegram(text) {
+  if (!text) return 'Không có response.';
+
+  let t = text;
+
+  // Strip raw JSON blocks (AI sometimes dumps JSON in response)
+  t = t.replace(/```json[\s\S]*?```/g, '');
+  t = t.replace(/```[\s\S]*?```/g, '');
+  // Strip standalone JSON objects
+  t = t.replace(/\{[\s\S]*?"intent"[\s\S]*?\}/g, '');
+
+  // Escape HTML special chars first (before adding our own HTML)
+  t = t.replace(/&/g, '&amp;')
+       .replace(/</g, '&lt;')
+       .replace(/>/g, '&gt;');
+
+  // Convert Markdown bold **text** → <b>text</b>
+  t = t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+
+  // Convert Markdown italic *text* → <i>text</i> (single asterisk)
+  t = t.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<i>$1</i>');
+
+  // Add spacing between major sections (emoji headers)
+  t = t.replace(/(▶️|📋|📊|🔴|📂|💡|⚠️|✅|🏢|🏠)/g, '\n$1');
+
+  // Clean up excessive newlines (3+ → 2)
+  t = t.replace(/\n{3,}/g, '\n\n');
+
+  // Trim
+  t = t.trim();
+
+  // Telegram message limit: 4096 chars
+  if (t.length > 4000) {
+    t = t.substring(0, 3990) + '\n\n... (truncated)';
+  }
+
+  return t;
 }
 
 function buildMainKeyboard() {
