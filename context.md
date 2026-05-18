@@ -239,3 +239,4 @@ npx wrangler tail
 | 3.0 | 2026-05-18 | Gamification (XP/Streak/Achievements), CAPTURE_BATCH, ADHD response optimization, urgency colors, HTML Telegram, 8AM briefing, drift checks, push slot |
 | 3.1 | 2026-05-18 | Rebrand: War Room → Stratt. DELETE/CLEANUP commands. New domain: stratt.rocky13.workers.dev |
 | 3.2 | 2026-05-18 | LIST_TASKS intent + regex fallback. AI CAPABILITIES section. Telegram format fix (MD→HTML, strip JSON). Anti-hallucination guards (CAPTURE safety net). Do Date sync. Password: HailMary13 |
+| 3.3 | 2026-05-18 | Robust JSON parser (multi-strategy extraction). Memory TTL 1h→24h. Cleaned 25 duplicate tasks. |

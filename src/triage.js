@@ -5,7 +5,7 @@ import { SYSTEM_PROMPT } from './prompts.js';
 import { recordCompletion, recordBatch, getStats, buildStatsFooter, buildAchievementMsg } from './gamification.js';
 
 // ─── Conversation Memory ─────────────────────────────
-const MEMORY_TTL = 3600;
+const MEMORY_TTL = 86400; // 24h — persist context throughout the day
 const MAX_MEMORY = 5;
 
 async function getConversation(chatId, env) {

@@ -408,6 +408,30 @@ MiniMax AI returned `notion_action: null` while saying "đã tạo" in response_
 
 ---
 
+## 2026-05-18 — Robust JSON Parser + TTL 24h (v3.3)
+
+### Root Cause
+MiniMax AI returned text BEFORE the JSON block (e.g., "OK, bỏ daily ret-b. Giờ check...```json{...}```"). The old parser only stripped code fences at start/end of string → `JSON.parse` failed → fell back to CLARIFY with raw JSON shown to user → `notion_action` lost → tasks never created.
+
+### Fix
+Replaced single-pass parser with 4-strategy extraction in `minimax.js`:
+
+| Strategy | Pattern |
+|----------|---------|
+| 1. Direct | `JSON.parse(content)` — pure JSON |
+| 2. Fence | Extract from `` ```json ... ``` `` anywhere in text |
+| 3. Brace | Find `{ ... "intent" ... }` block via regex |
+| 4. Fallback | Return as CLARIFY with raw text |
+
+Each strategy validates the parsed object has `intent` field before accepting.
+
+### Other Changes
+- Memory TTL: 1h → 24h (persist context throughout the day)
+- Cleaned 25 duplicate tasks (19× Log Jira, 4× Ana sharing dupes, 2× Daily ret-b)
+- Final task count: 10 clean tasks
+
+---
+
 ## Template for Future Entries
 
 ```markdown

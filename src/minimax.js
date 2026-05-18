@@ -50,19 +50,44 @@ export async function callMiniMax(systemPrompt, userMessage, apiKey, messages = 
   // MiniMax M2.7 wraps reasoning in <think>...</think> tags — strip them
   content = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 
-  // Also strip markdown code fences if present
-  content = content.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
+  // ─── Robust JSON extraction ─────────────────────────────
+  // AI sometimes returns text + ```json {...} ``` or text + bare JSON
+  // Strategy 1: Try direct parse (pure JSON response)
+  let parsed = tryParseJSON(content);
+  if (parsed) return parsed;
 
+  // Strategy 2: Extract from markdown code fence (```json ... ```)
+  const fenceMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) {
+    parsed = tryParseJSON(fenceMatch[1].trim());
+    if (parsed) return parsed;
+  }
+
+  // Strategy 3: Find first { ... } block that looks like our schema
+  const braceMatch = content.match(/\{[\s\S]*"intent"[\s\S]*\}/);
+  if (braceMatch) {
+    parsed = tryParseJSON(braceMatch[0]);
+    if (parsed) return parsed;
+  }
+
+  // Strategy 4: Nothing worked — return as CLARIFY with the raw text
+  console.error('MiniMax JSON parse failed. Raw content:', content.substring(0, 500));
+  return {
+    intent: 'CLARIFY',
+    response_text: content || 'Xin lỗi, mình không hiểu. Thử gõ lại?',
+    notion_action: null,
+    needs_confirmation: false,
+    follow_up_question: null,
+  };
+}
+
+function tryParseJSON(str) {
   try {
-    return JSON.parse(content);
+    const obj = JSON.parse(str);
+    // Validate it has our expected schema
+    if (obj && typeof obj === 'object' && obj.intent) return obj;
+    return null;
   } catch {
-    // If AI didn't return valid JSON, wrap it
-    return {
-      intent: 'CLARIFY',
-      response_text: content || 'Xin lỗi, mình không hiểu. Thử gõ lại?',
-      notion_action: null,
-      needs_confirmation: false,
-      follow_up_question: null,
-    };
+    return null;
   }
 }
