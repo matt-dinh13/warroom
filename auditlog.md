@@ -385,6 +385,29 @@ Applied to both direct message and callback_query handlers.
 
 ---
 
+## 2026-05-18 — Anti-Hallucination + Do Date Sync (v3.2c)
+
+### Scope
+Fix AI claiming "đã tạo" tasks without actually creating them. Sync Deadline→Do Date.
+
+### Root Cause
+MiniMax AI returned `notion_action: null` while saying "đã tạo" in response_text → user thinks tasks were created but Notion is empty.
+
+### Fix (3 layers)
+
+| Layer | What |
+|-------|------|
+| **Prompt** | New "QUY TẮC TẠO TASK" section: BẮT BUỘC trả notion_action, KHÔNG nói "đã tạo", KHÔNG nói "sandbox" |
+| **Safety net** | If intent=CAPTURE but no notion_action → show error + retry instructions |
+| **Guard** | If response contains "đã tạo" but no Notion write happened → append warning |
+
+### Do Date Sync
+- `createTask` + `editTask`: write both `Deadline` and `Do Date`
+- Backfill API: `/api/backfill-dodate` → 4 tasks synced
+- User's Notion view uses `Do Date` column
+
+---
+
 ## Template for Future Entries
 
 ```markdown

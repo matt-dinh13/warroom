@@ -88,6 +88,18 @@ export async function processChat(userMessage, env, chatId = 'web') {
     }
   }
 
+  // ─── Safety net: CAPTURE without notion_action ──────────────
+  // AI sometimes hallucinates "đã tạo" but doesn't send notion_action
+  const captureIntents = ['CAPTURE', 'CAPTURE_BATCH', 'CAPTURE_SPLIT'];
+  if (captureIntents.includes(aiResult.intent) && !action) {
+    console.error('BUG: AI returned CAPTURE intent without notion_action!', JSON.stringify(aiResult));
+    aiResult.response_text = '⚠️ **Lỗi hệ thống**: AI không gửi đúng data để tạo task.\n\n' +
+      '💡 Thử lại: gõ rõ từng task, VD:\n' +
+      '"Review deck GMA deadline 20/5"\n' +
+      'hoặc gửi nhiều task:\n' +
+      '"task1, task2, task3"';
+  }
+
   if (action) {
     try {
       switch (action.type) {
@@ -233,6 +245,16 @@ export async function processChat(userMessage, env, chatId = 'web') {
     } catch (err) {
       console.error('Notion error:', err);
       aiResult.response_text += `\n\n⚠️ Lỗi: ${err.message}`;
+    }
+  }
+
+  // ─── Final guard: strip hallucinated "đã tạo" claims ──────
+  // If no Notion write happened but AI claims success, strip the lie
+  if (!notionResult && !captureIntents.includes(aiResult.intent) &&
+      /đã tạo|đã capture|đã lưu|created|saved/i.test(aiResult.response_text)) {
+    // Check if this was supposed to be a capture
+    if (/task|tạo|capture|thêm|add/i.test(userMessage)) {
+      aiResult.response_text += '\n\n⚠️ **Lưu ý**: Task chưa được lưu vào Notion. Gõ lại rõ hơn để tạo thật.';
     }
   }
 
