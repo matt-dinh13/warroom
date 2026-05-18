@@ -51,6 +51,43 @@ export async function processChat(userMessage, env, chatId = 'web') {
   let notionResult = null;
   const action = aiResult.notion_action;
 
+  // ─── Direct intent overrides (bypass AI's notion_action) ──────
+  // When AI returns LIST_TASKS intent, always query Notion directly
+  if (aiResult.intent === 'LIST_TASKS' || (!action && /li[eệ]t k[eê]|list\s*task|xem\s*task|task\s*ch[uư]a\s*[đd][oó]ng|task\s*[đd]ang\s*m[oở]/i.test(userMessage))) {
+    try {
+      const activeTasks = await queryTasks('all_active', env);
+      if (!activeTasks || activeTasks.length === 0) {
+        aiResult.response_text = '✨ Không có task nào đang mở!\n\n💡 Gõ task mới để bắt đầu.';
+      } else {
+        const grouped = {};
+        activeTasks.forEach(t => {
+          const st = t.status || 'To do';
+          if (!grouped[st]) grouped[st] = [];
+          grouped[st].push(t);
+        });
+        const statusIcons = { 'In progress': '🔥', 'To do': '📋', 'Pending / Wait for approved': '⏳' };
+        let lines = [`📊 **${activeTasks.length} tasks đang mở:**\n`];
+        for (const [status, tasks] of Object.entries(grouped)) {
+          const icon = statusIcons[status] || '📌';
+          lines.push(`${icon} **${status}** (${tasks.length})`);
+          tasks.forEach((t, i) => {
+            const project = t.project ? ` [${t.project}]` : '';
+            const urgency = t.urgency ? ` ${t.urgency}` : '';
+            const deadline = t.deadline ? ` ⏰${t.deadline}` : '';
+            lines.push(`  ${i + 1}. ${t.title}${project}${urgency}${deadline}`);
+          });
+          lines.push('');
+        }
+        lines.push('💡 Gõ "xoá [tên]" để xoá, "plan" để sắp xếp.');
+        aiResult.response_text = lines.join('\n');
+      }
+      aiResult.intent = 'LIST_TASKS';
+    } catch (err) {
+      console.error('List tasks error:', err);
+      aiResult.response_text += `\n\n⚠️ Lỗi query: ${err.message}`;
+    }
+  }
+
   if (action) {
     try {
       switch (action.type) {
@@ -143,6 +180,40 @@ export async function processChat(userMessage, env, chatId = 'web') {
             aiResult.response_text = `🧹 **Dọn dẹp** — ${allTasks.length} tasks:\n\n${taskList}\n\n💡 Gõ "xoá [tên task]" để xoá từng cái, hoặc "xoá completed" để xoá hết task đã xong.`;
           }
           break;
+
+        case 'list': {
+          const activeTasks = await queryTasks('all_active', env);
+          if (!activeTasks || activeTasks.length === 0) {
+            aiResult.response_text = '✨ Không có task nào đang mở!\n\n💡 Gõ task mới để bắt đầu.';
+          } else {
+            // Group by status
+            const grouped = {};
+            activeTasks.forEach(t => {
+              const st = t.status || 'To do';
+              if (!grouped[st]) grouped[st] = [];
+              grouped[st].push(t);
+            });
+
+            const statusIcons = { 'In progress': '🔥', 'To do': '📋', 'Pending / Wait for approved': '⏳' };
+            let lines = [`📊 **${activeTasks.length} tasks đang mở:**\n`];
+
+            for (const [status, tasks] of Object.entries(grouped)) {
+              const icon = statusIcons[status] || '📌';
+              lines.push(`${icon} **${status}** (${tasks.length})`);
+              tasks.forEach((t, i) => {
+                const project = t.project ? ` [${t.project}]` : '';
+                const urgency = t.urgency ? ` ${t.urgency}` : '';
+                const deadline = t.deadline ? ` ⏰${t.deadline}` : '';
+                lines.push(`  ${i + 1}. ${t.title}${project}${urgency}${deadline}`);
+              });
+              lines.push('');
+            }
+
+            lines.push('💡 Gõ "sắp xếp" hoặc "plan" để tổ chức lại.');
+            aiResult.response_text = lines.join('\n');
+          }
+          break;
+        }
       }
 
       // Handle CAPTURE_SPLIT
