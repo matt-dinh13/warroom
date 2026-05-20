@@ -134,6 +134,10 @@ function showChat() {
   authScreen.classList.remove('active');
   chatScreen.classList.add('active');
   chatInput.focus();
+  // Scroll to bottom after screen is visible (for restored history)
+  requestAnimationFrame(() => {
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  });
 }
 
 // ─── Chat ──────────────────────────────────────
