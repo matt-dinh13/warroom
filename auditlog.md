@@ -670,45 +670,47 @@ User → regex match? → YES → execute directly (<1s)
 ## 2026-05-18 — Disable Regex Phase 1 + StatusMap Fix (v4.1)
 
 ### Scope
-Regex-based command detection caused critical false positives. Disabled all regex except "done N". Expanded statusMap.
+Regex-based command detection caused critical false positives. Disabled all regex except "done N". Added UPDATE fallback. Expanded statusMap.
 
-### Problems Found
-1. "meeting với marek cập nhật thành closed" → regex didn't match UPDATE → fell to AI → AI returned plain text → capture fallback created a NEW task instead of updating
-2. "Closed" status sent raw to Notion API → 400 error (only "Completed" exists)
-3. Regex patterns too broad: "nhờ/giúp/làm" triggered task creation for normal messages
-4. Multiple regex layers fighting each other → unpredictable behavior
+### Problems Found & Fixed
+1. **"[task] cập nhật thành closed" → created new task** — regex didn't catch it, AI returned plain text, capture fallback triggered falsely
+2. **"Closed" status → Notion 400 error** — statusMap only had Done/Dropped, not Closed/xong/hoàn thành
+3. **Capture fallback too aggressive** — triggered for update/edit/delete messages when AI response contained 📌
+4. **Title parser wrong priority** — matched `📋 Task đã capture:` before `📌 actual title`
 
-### Decision: Disable Regex, Trust AI
-
-#### D30: Regex Off, AI On
-- **Decision:** Disable all Phase 1 regex commands except "done N". Let AI handle everything.
-- **Reason:** Regex caused more bugs than it solved. AI correctly identifies intent ~90% of the time. The 10% failure (plain text response) is handled by capture fallback.
-- **Trade-off:** Response time back to 5-15s for all commands (except "done N"). Acceptable — reliability > speed.
-- **Impact:** Simpler code, fewer edge cases, predictable behavior.
+### Final Architecture (v4.1)
+```
+User message
+  ├─ "done 1/2/3" → local instant (Phase 1, only this remains)
+  └─ everything else → AI call → notion_action?
+       ├─ YES (AI returned JSON) → execute action
+       └─ NO (AI returned plain text) → fallbacks:
+            ├─ isUpdateIntent? → extract task name → updateTaskStatus
+            └─ has 📌 + NOT update/edit/delete? → parse → createTask
+```
 
 ### Changes Made
 
 | File | Change |
 |------|--------|
-| `src/triage.js` | Commented out all Phase 1 regex (plan, overdue, load, backlog, list, delete, report, done-by-name, update patterns) |
-| `src/triage.js` | Simplified fallback: only capture fallback (📌/📋 in AI response) |
-| `src/triage.js` | Added `saveLastPlan` after TRIAGE/LIST queries for "done N" |
-| `src/notion.js` | Expanded `statusMap`: Closed, done, xong, hoàn thành, drop, in progress, todo, pending → correct Notion values |
-| `src/notion.js` | Default fallback: unknown status → 'Completed' (safe default) |
+| `src/triage.js` | Disabled all Phase 1 regex except "done N" |
+| `src/triage.js` | Added UPDATE fallback: detect "cập nhật/close/done/xong" → extract task → update Notion |
+| `src/triage.js` | Capture fallback guarded: skip when message is update/edit/delete |
+| `src/triage.js` | Title parser: prefer 📌 over 📋 |
+| `src/notion.js` | statusMap expanded: Closed, done, xong, hoàn thành, drop, in progress, todo, pending |
+| `src/notion.js` | Default fallback: unknown status → 'Completed' |
+| `context.md` | Updated version history |
+| `auditlog.md` | This entry |
 
-### What Remains Active
-- **"done 1/2/3"** — local, instant, unambiguous (number = no false positive)
-- **AI pipeline** — handles all natural language (create, update, edit, delete, query)
-- **Capture fallback** — when AI returns 📌/📋 in plain text, parse and create task
-- **2-minute rule + context switch** — still active in AI create handler
+### Verification Results (tested locally before deploy)
 
-### Verification
 | Test | Result |
 |------|--------|
-| "meeting với marek cập nhật thành closed" | ✅ AI handles → UPDATE → Completed |
-| "tạo task X" | ✅ AI handles → CREATE |
-| "plan" | ✅ AI handles → TRIAGE query |
+| "[task] cập nhật thành closed" | ✅ Updates Notion (not creates) |
+| "tạo task X, project Y, deadline Z" | ✅ Creates in Notion |
+| "xoá [task]" | ✅ Archives |
 | "done 1" | ✅ Local instant |
+| "plan" | ✅ AI queries Notion |
 | Normal chat | ✅ No false task creation |
 
 ---
