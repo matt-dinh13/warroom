@@ -88,6 +88,32 @@ export async function processChat(userMessage, env, chatId = 'web') {
     return buildResult('UPDATE', buildCompletionResponse(result, xpGained, newAchievements, stats));
   }
 
+  // UPDATE NATURAL LANGUAGE: "[task] cập nhật thành/sang/về [status]", "close [task]", "[task] done"
+  const updatePatterns = [
+    // "meeting với marek cập nhật thành closed"
+    /^(.+?)\s+(?:c[aậ]p\s*nh[aậ]t|chuy[eể]n|đ[oổ]i)\s+(?:th[aà]nh|sang|v[eề])\s+(?:closed|completed|done|xong|ho[aà]n\s*th[aà]nh)/i,
+    // "close meeting với marek"
+    /^(?:close|closed|ho[aà]n\s*th[aà]nh)\s+(.+)$/i,
+    // "meeting với marek done/xong" (task name at start, status at end)
+    /^(.+?)\s+(?:done|xong|closed|completed|ho[aà]n\s*th[aà]nh)$/i,
+  ];
+  for (const pattern of updatePatterns) {
+    const m = msg.match(pattern);
+    if (m) {
+      const taskName = m[1].trim();
+      if (taskName.length >= 3) {
+        const result = await updateTaskStatus(taskName, 'Completed', env);
+        if (result) {
+          const isFire = (result.urgency || '').includes('Fire');
+          const { xpGained, newAchievements, stats } = await recordCompletion(chatId, env, isFire);
+          return buildResult('UPDATE', buildCompletionResponse(result, xpGained, newAchievements, stats));
+        }
+        // If not found, don't create a task — just report not found
+        return buildResult('UPDATE', `❌ Không tìm thấy "${taskName}".\n💡 Gõ "plan" để xem danh sách, hoặc "done 1" theo số.`);
+      }
+    }
+  }
+
   // PLAN: "plan", "plan today", "hôm nay"
   if (/^(?:plan\s*(?:today)?|h[oô]m\s*nay|[uư]u\s*ti[eê]n|today)$/i.test(msg)) {
     const tasks = await queryTasks('today', env);
@@ -242,8 +268,26 @@ export async function processChat(userMessage, env, chatId = 'web') {
 
   // ─── Fallbacks when AI returns plain text ──────────────────
   if (!action && !notionResult) {
-    // Try parse from AI response first
-    if (/📌|📋|Task:|đ[aã]\s*t[aạ]o|captured|✅/i.test(responseText)) {
+    // GUARD: detect if message is an update/status change (not a new task)
+    const looksLikeUpdate = /c[aậ]p\s*nh[aậ]t|chuy[eể]n.*(?:th[aà]nh|sang)|close|done$|xong$|completed/i.test(msg);
+
+    // UPDATE fallback: AI didn't return action but message is clearly a status update
+    if (looksLikeUpdate) {
+      // Try to extract task name from message
+      const updateMatch = msg.match(/^(.+?)\s+(?:c[aậ]p\s*nh[aậ]t|chuy[eể]n|close|done|xong|completed)/i);
+      if (updateMatch && updateMatch[1].trim().length >= 3) {
+        const result = await updateTaskStatus(updateMatch[1].trim(), 'Completed', env);
+        if (result) {
+          const isFire = (result.urgency || '').includes('Fire');
+          const { xpGained, newAchievements, stats } = await recordCompletion(chatId, env, isFire);
+          notionResult = result;
+          responseText = buildCompletionResponse(result, xpGained, newAchievements, stats);
+        }
+      }
+    }
+
+    // Try parse CAPTURE from AI response (only if NOT an update)
+    if (!notionResult && !looksLikeUpdate && /📌|📋|Task:|đ[aã]\s*t[aạ]o|captured/i.test(responseText)) {
       const fallbackTask = tryParseCaptureFromAIResponse(responseText, msg);
       if (fallbackTask) {
         try { notionResult = await createTask(fallbackTask, env); responseText = buildCaptureConfirmation(fallbackTask); } catch {}
@@ -251,15 +295,16 @@ export async function processChat(userMessage, env, chatId = 'web') {
     }
 
     // If AI response didn't have parseable data, try parsing directly from user message
-    if (!notionResult && /t[aạ]o|capture|th[eê]m|add|task|nhờ|giúp|làm/i.test(msg)) {
+    // GUARD: Don't trigger if message looks like an update/edit (not a new task)
+    if (!notionResult && !looksLikeUpdate && /^(?:t[aạ]o|capture|th[eê]m|add)\s/i.test(msg)) {
       const directTask = tryParseTaskFromUserMessage(msg);
       if (directTask) {
         try { notionResult = await createTask(directTask, env); responseText = buildCaptureConfirmation(directTask); } catch {}
       }
     }
 
-    // EDIT fallback
-    if (!notionResult && /s[uử]a|edit|[đd][ổo]i|update|stakeholder|assigned/i.test(msg)) {
+    // EDIT fallback — but NOT if it's a status update (those are handled in Phase 1)
+    if (!notionResult && /s[uử]a|edit|[đd][ổo]i|stakeholder|assigned/i.test(msg) && !looksLikeUpdate) {
       const editFb = tryParseEditFromMessage(msg, responseText);
       if (editFb) {
         try {
