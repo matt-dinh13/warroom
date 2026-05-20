@@ -328,8 +328,22 @@ export async function updateTaskStatus(taskTitle, newStatus, env) {
     '❌ Dropped': 'Completed',
     'Done': 'Completed',
     'Dropped': 'Completed',
+    'Closed': 'Completed',
+    'closed': 'Completed',
+    'done': 'Completed',
+    'xong': 'Completed',
+    'hoàn thành': 'Completed',
+    'completed': 'Completed',
+    'drop': 'Completed',
+    'In progress': 'In progress',
+    'in progress': 'In progress',
+    'doing': 'In progress',
+    'To do': 'To do',
+    'todo': 'To do',
+    'Pending': 'Pending / Wait for approved',
+    'pending': 'Pending / Wait for approved',
   };
-  const mappedStatus = statusMap[newStatus] || newStatus;
+  const mappedStatus = statusMap[newStatus] || statusMap[newStatus.toLowerCase()] || 'Completed';
 
   const searchResponse = await fetch(
     `${NOTION_BASE}/databases/${env.NOTION_TASKS_DB_ID}/query`,
