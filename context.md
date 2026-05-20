@@ -246,3 +246,4 @@ npx wrangler tail
 | 3.5 | 2026-05-18 | CAPTURE/EDIT fallback: server-side parsing when AI returns plain text. editTask supports all fields (assigned_by, notes, title, resource, status, source). Confirmation response on task create. |
 | 3.6 | 2026-05-18 | Query redesign: "today" = due today + overdue only. Backlog = Someday. Regex fallbacks for TRIAGE/OVERDUE/LOAD/BACKLOG. Separated active tasks from backlog in all views. |
 | 4.0 | 2026-05-18 | Engine-first architecture: commands execute instantly without AI. Done-by-number. 2-minute rule. Context switch warning. Auto-defer cron (23:30). |
+| 4.1 | 2026-05-18 | Disabled Phase 1 regex (caused false positives). Only "done N" stays local. All other commands go through AI. Added direct user message parser fallback. Expanded statusMap. |

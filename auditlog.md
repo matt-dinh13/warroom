@@ -667,6 +667,52 @@ User → regex match? → YES → execute directly (<1s)
 
 ---
 
+## 2026-05-18 — Disable Regex Phase 1 + StatusMap Fix (v4.1)
+
+### Scope
+Regex-based command detection caused critical false positives. Disabled all regex except "done N". Expanded statusMap.
+
+### Problems Found
+1. "meeting với marek cập nhật thành closed" → regex didn't match UPDATE → fell to AI → AI returned plain text → capture fallback created a NEW task instead of updating
+2. "Closed" status sent raw to Notion API → 400 error (only "Completed" exists)
+3. Regex patterns too broad: "nhờ/giúp/làm" triggered task creation for normal messages
+4. Multiple regex layers fighting each other → unpredictable behavior
+
+### Decision: Disable Regex, Trust AI
+
+#### D30: Regex Off, AI On
+- **Decision:** Disable all Phase 1 regex commands except "done N". Let AI handle everything.
+- **Reason:** Regex caused more bugs than it solved. AI correctly identifies intent ~90% of the time. The 10% failure (plain text response) is handled by capture fallback.
+- **Trade-off:** Response time back to 5-15s for all commands (except "done N"). Acceptable — reliability > speed.
+- **Impact:** Simpler code, fewer edge cases, predictable behavior.
+
+### Changes Made
+
+| File | Change |
+|------|--------|
+| `src/triage.js` | Commented out all Phase 1 regex (plan, overdue, load, backlog, list, delete, report, done-by-name, update patterns) |
+| `src/triage.js` | Simplified fallback: only capture fallback (📌/📋 in AI response) |
+| `src/triage.js` | Added `saveLastPlan` after TRIAGE/LIST queries for "done N" |
+| `src/notion.js` | Expanded `statusMap`: Closed, done, xong, hoàn thành, drop, in progress, todo, pending → correct Notion values |
+| `src/notion.js` | Default fallback: unknown status → 'Completed' (safe default) |
+
+### What Remains Active
+- **"done 1/2/3"** — local, instant, unambiguous (number = no false positive)
+- **AI pipeline** — handles all natural language (create, update, edit, delete, query)
+- **Capture fallback** — when AI returns 📌/📋 in plain text, parse and create task
+- **2-minute rule + context switch** — still active in AI create handler
+
+### Verification
+| Test | Result |
+|------|--------|
+| "meeting với marek cập nhật thành closed" | ✅ AI handles → UPDATE → Completed |
+| "tạo task X" | ✅ AI handles → CREATE |
+| "plan" | ✅ AI handles → TRIAGE query |
+| "done 1" | ✅ Local instant |
+| Normal chat | ✅ No false task creation |
+
+---
+
 ## Template for Future Entries
 
 ```markdown

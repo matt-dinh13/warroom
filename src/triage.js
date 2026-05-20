@@ -198,12 +198,40 @@ export async function processChat(userMessage, env, chatId = 'web') {
     }
   }
 
-  // ─── Fallback: AI returned plain text with task data ─────────
-  // Only trigger capture fallback when AI clearly parsed a task but didn't return JSON
-  if (!action && !notionResult && /📌|📋/.test(responseText)) {
-    const fallbackTask = tryParseCaptureFromAIResponse(responseText, msg);
-    if (fallbackTask) {
-      try { notionResult = await createTask(fallbackTask, env); responseText = buildCaptureConfirmation(fallbackTask); } catch {}
+  // ─── Fallback: AI returned plain text ─────────────────────────
+  const isUpdateIntent = /c[aậ]p\s*nh[aậ]t|chuy[eể]n|close|done|xong|completed|ho[aà]n\s*th[aà]nh|drop/i.test(msg);
+  const isEditIntent = /s[uử]a|edit|[đd][ổo]i|stakeholder|assigned/i.test(msg);
+  const isDeleteIntent = /xo[aá]|delete|remove|b[oỏ]/i.test(msg);
+
+  if (!action && !notionResult) {
+    // UPDATE fallback: extract task name and mark completed
+    if (isUpdateIntent) {
+      const updateMatch = msg.match(/^(.+?)\s+(?:c[aậ]p\s*nh[aậ]t|chuy[eể]n|close|done|xong|completed|ho[aà]n\s*th[aà]nh|drop)/i)
+        || msg.match(/^(?:close|done|xong|ho[aà]n\s*th[aà]nh|drop)\s+(.+)$/i);
+      if (updateMatch) {
+        const taskName = updateMatch[1].trim();
+        if (taskName.length >= 3) {
+          try {
+            const result = await updateTaskStatus(taskName, 'Completed', env);
+            if (result) {
+              const isFire = (result.urgency || '').includes('Fire');
+              const { xpGained, newAchievements, stats } = await recordCompletion(chatId, env, isFire);
+              notionResult = result;
+              responseText = buildCompletionResponse(result, xpGained, newAchievements, stats);
+            }
+          } catch (err) {
+            console.error('Update fallback error:', err);
+          }
+        }
+      }
+    }
+
+    // CAPTURE fallback: only when message is clearly a new task creation
+    if (!notionResult && !isUpdateIntent && !isEditIntent && !isDeleteIntent && /📌|📋/.test(responseText)) {
+      const fallbackTask = tryParseCaptureFromAIResponse(responseText, msg);
+      if (fallbackTask) {
+        try { notionResult = await createTask(fallbackTask, env); responseText = buildCaptureConfirmation(fallbackTask); } catch {}
+      }
     }
   }
 
@@ -623,8 +651,9 @@ function tryParseTaskFromUserMessage(msg) {
 function tryParseCaptureFromAIResponse(aiResponse, userMessage) {
   if (!aiResponse) return null;
 
-  // Extract title from 📌 or 📋 Task: line
-  const titleMatch = aiResponse.match(/(?:📌|📋)\s*(?:Task:\s*)?(.+?)(?:\s*\||\n|$)/);
+  // Extract title — prefer 📌 line (specific task name), fallback to 📋
+  let titleMatch = aiResponse.match(/📌\s*(.+?)(?:\s*\||\n|$)/);
+  if (!titleMatch) titleMatch = aiResponse.match(/📋\s*(?:Task:\s*)?(.+?)(?:\s*\||\n|$)/);
   if (!titleMatch) return null;
 
   const title = titleMatch[1].trim();
