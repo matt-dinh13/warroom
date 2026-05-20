@@ -62,9 +62,9 @@ export async function processChat(userMessage, env, chatId = 'web') {
   const { dateContext, dayType, capacity, vnHour } = getVNContext();
   const msg = userMessage.trim();
 
-  // ═══ PHASE 1: Direct Commands (NO AI call, instant) ═══════
+  // ═══ PHASE 1: Only "done N" shortcut (instant, no AI) ═══════
 
-  // DONE BY NUMBER: "done 1", "xong 2"
+  // DONE BY NUMBER: "done 1", "xong 2" — unambiguous, always works
   const doneNumMatch = msg.match(/^(?:done|xong)\s+(\d+)$/i);
   if (doneNumMatch) {
     const idx = parseInt(doneNumMatch[1]) - 1;
@@ -78,88 +78,20 @@ export async function processChat(userMessage, env, chatId = 'web') {
     return buildResult('UPDATE', buildCompletionResponse(result, xpGained, newAchievements, stats));
   }
 
+  /*
+  // ═══ PHASE 1 DISABLED: Regex commands caused false positives ═══════
+  // Kept for reference — may re-enable selectively later
+
   // DONE BY NAME: "done [name]", "xong [name]"
   const doneNameMatch = msg.match(/^(?:done|xong|drop)\s+(.+)$/i);
-  if (doneNameMatch) {
-    const result = await updateTaskStatus(doneNameMatch[1].trim(), 'Completed', env);
-    if (!result) return buildResult('UPDATE', `❌ Không tìm thấy "${doneNameMatch[1]}".\n💡 Gõ "plan" để xem danh sách.`);
-    const isFire = (result.urgency || '').includes('Fire');
-    const { xpGained, newAchievements, stats } = await recordCompletion(chatId, env, isFire);
-    return buildResult('UPDATE', buildCompletionResponse(result, xpGained, newAchievements, stats));
-  }
+  if (doneNameMatch) { ... }
 
-  // UPDATE NATURAL LANGUAGE: "[task] cập nhật thành/sang/về [status]", "close [task]", "[task] done"
-  const updatePatterns = [
-    // "meeting với marek cập nhật thành closed"
-    /^(.+?)\s+(?:c[aậ]p\s*nh[aậ]t|chuy[eể]n|đ[oổ]i)\s+(?:th[aà]nh|sang|v[eề])\s+(?:closed|completed|done|xong|ho[aà]n\s*th[aà]nh)/i,
-    // "close meeting với marek"
-    /^(?:close|closed|ho[aà]n\s*th[aà]nh)\s+(.+)$/i,
-    // "meeting với marek done/xong" (task name at start, status at end)
-    /^(.+?)\s+(?:done|xong|closed|completed|ho[aà]n\s*th[aà]nh)$/i,
-  ];
-  for (const pattern of updatePatterns) {
-    const m = msg.match(pattern);
-    if (m) {
-      const taskName = m[1].trim();
-      if (taskName.length >= 3) {
-        const result = await updateTaskStatus(taskName, 'Completed', env);
-        if (result) {
-          const isFire = (result.urgency || '').includes('Fire');
-          const { xpGained, newAchievements, stats } = await recordCompletion(chatId, env, isFire);
-          return buildResult('UPDATE', buildCompletionResponse(result, xpGained, newAchievements, stats));
-        }
-        // If not found, don't create a task — just report not found
-        return buildResult('UPDATE', `❌ Không tìm thấy "${taskName}".\n💡 Gõ "plan" để xem danh sách, hoặc "done 1" theo số.`);
-      }
-    }
-  }
+  // UPDATE NATURAL LANGUAGE: "[task] cập nhật thành closed", "close [task]", "[task] done"
+  const updatePatterns = [ ... ];
 
   // PLAN: "plan", "plan today", "hôm nay"
-  if (/^(?:plan\s*(?:today)?|h[oô]m\s*nay|[uư]u\s*ti[eê]n|today)$/i.test(msg)) {
-    const tasks = await queryTasks('today', env);
-    const stats = await getStats(chatId, env);
-    if (tasks.length > 0) await saveLastPlan(chatId, tasks, env);
-    return buildResult('TRIAGE', buildTriageResponse(tasks, stats), tasks.length);
-  }
-
-  // OVERDUE
-  if (/overdue|qu[eê]n|b[oỏ]\s*(?:s[oó]t|qu[eê]n)/i.test(msg)) {
-    const tasks = await queryTasks('overdue', env);
-    return buildResult('OVERDUE_CHECK', buildOverdueResponse(tasks), tasks.length);
-  }
-
-  // LOAD CHECK
-  if (/^(?:check\s*load|load|overload|qu[aá]\s*t[aả]i)$/i.test(msg)) {
-    const tasks = await queryTasks('all_active', env);
-    return buildResult('LOAD_CHECK', buildLoadCheckResponse(tasks), tasks.length);
-  }
-
-  // BACKLOG
-  if (/backlog|c[oó]\s*g[iì]\s*l[aà]m|r[aả]nh|[yý]\s*t[uư][oở]ng/i.test(msg)) {
-    const tasks = await queryTasks('backlog', env);
-    return buildResult('BACKLOG_BROWSE', buildBacklogResponse(tasks), tasks.length);
-  }
-
-  // LIST
-  if (/^(?:list|xem\s*h[eế]t|li[eệ]t\s*k[eê])$/i.test(msg) || /li[eệ]t k[eê]|list\s*task|xem\s*task/i.test(msg)) {
-    const tasks = await queryTasks('all_active', env);
-    return buildResult('LIST_TASKS', buildListResponse(tasks), tasks.length);
-  }
-
-  // DELETE: "xoá [task]"
-  const deleteMatch = msg.match(/^(?:xo[aá]|delete|remove)\s+(.+)$/i);
-  if (deleteMatch) {
-    const archived = await archiveTask(deleteMatch[1].trim(), env);
-    if (!archived) return buildResult('DELETE', `❌ Không tìm thấy "${deleteMatch[1]}".`);
-    return buildResult('DELETE', `🗑️ Đã xoá: "${archived.title}"\n\n💡 Gõ "plan" để xem task còn lại.`);
-  }
-
-  // REPORT
-  if (/^(?:report|summary|b[aá]o\s*c[aá]o)$/i.test(msg)) {
-    const tasks = await queryTasks('weekly_report', env);
-    const stats = await getStats(chatId, env);
-    return buildResult('REPORT', buildReportResponse(tasks, stats));
-  }
+  // OVERDUE, LOAD CHECK, BACKLOG, LIST, DELETE, REPORT
+  */
 
   // ═══ PHASE 2: AI-Powered (natural language capture) ═══════
   const enrichedMessage = `${dateContext}\n${msg}`;
@@ -266,53 +198,18 @@ export async function processChat(userMessage, env, chatId = 'web') {
     }
   }
 
-  // ─── Fallbacks when AI returns plain text ──────────────────
-  if (!action && !notionResult) {
-    // GUARD: detect if message is an update/status change (not a new task)
-    const looksLikeUpdate = /c[aậ]p\s*nh[aậ]t|chuy[eể]n.*(?:th[aà]nh|sang)|close|done$|xong$|completed/i.test(msg);
-
-    // UPDATE fallback: AI didn't return action but message is clearly a status update
-    if (looksLikeUpdate) {
-      // Try to extract task name from message
-      const updateMatch = msg.match(/^(.+?)\s+(?:c[aậ]p\s*nh[aậ]t|chuy[eể]n|close|done|xong|completed)/i);
-      if (updateMatch && updateMatch[1].trim().length >= 3) {
-        const result = await updateTaskStatus(updateMatch[1].trim(), 'Completed', env);
-        if (result) {
-          const isFire = (result.urgency || '').includes('Fire');
-          const { xpGained, newAchievements, stats } = await recordCompletion(chatId, env, isFire);
-          notionResult = result;
-          responseText = buildCompletionResponse(result, xpGained, newAchievements, stats);
-        }
-      }
+  // ─── Fallback: AI returned plain text with task data ─────────
+  // Only trigger capture fallback when AI clearly parsed a task but didn't return JSON
+  if (!action && !notionResult && /📌|📋/.test(responseText)) {
+    const fallbackTask = tryParseCaptureFromAIResponse(responseText, msg);
+    if (fallbackTask) {
+      try { notionResult = await createTask(fallbackTask, env); responseText = buildCaptureConfirmation(fallbackTask); } catch {}
     }
+  }
 
-    // Try parse CAPTURE from AI response (only if NOT an update)
-    if (!notionResult && !looksLikeUpdate && /📌|📋|Task:|đ[aã]\s*t[aạ]o|captured/i.test(responseText)) {
-      const fallbackTask = tryParseCaptureFromAIResponse(responseText, msg);
-      if (fallbackTask) {
-        try { notionResult = await createTask(fallbackTask, env); responseText = buildCaptureConfirmation(fallbackTask); } catch {}
-      }
-    }
-
-    // If AI response didn't have parseable data, try parsing directly from user message
-    // GUARD: Don't trigger if message looks like an update/edit (not a new task)
-    if (!notionResult && !looksLikeUpdate && /^(?:t[aạ]o|capture|th[eê]m|add)\s/i.test(msg)) {
-      const directTask = tryParseTaskFromUserMessage(msg);
-      if (directTask) {
-        try { notionResult = await createTask(directTask, env); responseText = buildCaptureConfirmation(directTask); } catch {}
-      }
-    }
-
-    // EDIT fallback — but NOT if it's a status update (those are handled in Phase 1)
-    if (!notionResult && /s[uử]a|edit|[đd][ổo]i|stakeholder|assigned/i.test(msg) && !looksLikeUpdate) {
-      const editFb = tryParseEditFromMessage(msg, responseText);
-      if (editFb) {
-        try {
-          const r = await editTask(editFb.task_title, editFb.updates, env);
-          if (r) { notionResult = r; responseText = `✏️ Đã sửa "${r.title}":\n${Object.entries(editFb.updates).map(([k,v])=>`  • ${k}: ${v}`).join('\n')}\n\n💡 Gõ "plan" để xem lại.`; }
-        } catch {}
-      }
-    }
+  // Save last plan for "done N" feature
+  if (Array.isArray(notionResult) && (aiResult.intent === 'TRIAGE' || aiResult.intent === 'LIST_TASKS')) {
+    await saveLastPlan(chatId, notionResult, env);
   }
 
   // Save memory
