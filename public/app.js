@@ -516,7 +516,7 @@ function calGoToday() {
 async function fetchCalendar() {
   const loading = $('cal-loading');
   loading.hidden = false;
-  const ws = calWeekStart.toISOString().split('T')[0];
+  const ws = localDateStr(calWeekStart);
   try {
     const res = await fetch(`${API}/calendar?week=${ws}`);
     if (!res.ok) throw new Error(res.status);
@@ -615,7 +615,7 @@ function renderCalendar() {
     const mins = parseInt(timePart.split(':')[1]) || 0;
 
     // Find which day column
-    const dayDiff = Math.round((new Date(dateStr) - new Date(calWeekStart.toISOString().split('T')[0])) / 86400000);
+    const dayDiff = Math.round((new Date(dateStr) - new Date(localDateStr(calWeekStart))) / 86400000);
     if (dayDiff < 0 || dayDiff > 6) return;
 
     const slotIndex = (hours - CAL_START_HOUR) * 2 + Math.floor(mins / 30);
@@ -668,7 +668,7 @@ function updateCalNowLine() {
   const m = now.getMinutes();
   if (h < CAL_START_HOUR || h >= CAL_END_HOUR) return;
 
-  const dayDiff = Math.round((new Date(today) - new Date(calWeekStart.toISOString().split('T')[0])) / 86400000);
+  const dayDiff = Math.round((new Date(today) - new Date(localDateStr(calWeekStart))) / 86400000);
   if (dayDiff < 0 || dayDiff > 6) return;
 
   const totalMins = (h - CAL_START_HOUR) * 60 + m;

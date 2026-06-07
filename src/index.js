@@ -241,22 +241,20 @@ export default {
             );
           }
           const weekParam = url.searchParams.get('week');
-          // Calculate week start (Monday) and end (Sunday)
-          let weekStart;
-          if (weekParam) {
-            weekStart = new Date(weekParam);
-          } else {
-            weekStart = new Date();
-          }
-          // Adjust to Monday
-          const day = weekStart.getDay();
+          // Use the provided date or today (in UTC — CF Workers run in UTC)
+          const refDate = weekParam ? new Date(weekParam + 'T12:00:00Z') : new Date();
+          // Adjust to Monday (ISO week start)
+          const day = refDate.getUTCDay();
           const diff = day === 0 ? -6 : 1 - day;
-          weekStart.setDate(weekStart.getDate() + diff);
-          const weekEnd = new Date(weekStart);
-          weekEnd.setDate(weekEnd.getDate() + 6);
+          const monday = new Date(refDate);
+          monday.setUTCDate(refDate.getUTCDate() + diff);
+          const sunday = new Date(monday);
+          sunday.setUTCDate(monday.getUTCDate() + 6);
 
-          const ws = weekStart.toISOString().split('T')[0];
-          const we = weekEnd.toISOString().split('T')[0];
+          // Format as YYYY-MM-DD strings
+          const pad = n => String(n).padStart(2, '0');
+          const ws = `${monday.getUTCFullYear()}-${pad(monday.getUTCMonth() + 1)}-${pad(monday.getUTCDate())}`;
+          const we = `${sunday.getUTCFullYear()}-${pad(sunday.getUTCMonth() + 1)}-${pad(sunday.getUTCDate())}`;
 
           const tasks = await queryTasks('calendar_week', env, { weekStart: ws, weekEnd: we });
           return new Response(
