@@ -486,6 +486,14 @@ const CAL_END_HOUR = 23;
 const CAL_SLOTS = (CAL_END_HOUR - CAL_START_HOUR) * 2; // 32 half-hours
 const DAY_NAMES = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 
+// Helper: get YYYY-MM-DD from Date using local timezone (not UTC)
+function localDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function calInitWeek() {
   const now = new Date();
   const day = now.getDay();
@@ -525,7 +533,7 @@ async function fetchCalendar() {
 function renderCalendar() {
   const grid = $('cal-grid');
   grid.innerHTML = '';
-  const today = new Date().toISOString().split('T')[0];
+  const today = localDateStr(new Date());
 
   // Update week label
   const we = new Date(calWeekStart);
@@ -542,7 +550,7 @@ function renderCalendar() {
   for (let d = 0; d < 7; d++) {
     const date = new Date(calWeekStart);
     date.setDate(date.getDate() + d);
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = localDateStr(date);
     const header = document.createElement('div');
     header.className = 'cal-day-header' + (dateStr === today ? ' today' : '');
     header.innerHTML = `<span class="cal-day-name">${DAY_NAMES[date.getDay()]}</span><span class="cal-day-num">${date.getDate()}</span>`;
@@ -582,7 +590,7 @@ function renderCalendar() {
       // Click to schedule (empty slot)
       const cellDate = new Date(calWeekStart);
       cellDate.setDate(cellDate.getDate() + d);
-      const cellDateStr = cellDate.toISOString().split('T')[0];
+      const cellDateStr = localDateStr(cellDate);
       const cellTime = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
       cell.addEventListener('click', () => {
         // If there's a dragged task, could schedule it here
@@ -599,13 +607,15 @@ function renderCalendar() {
   const unscheduled = calTasks.filter(t => !t.scheduled);
 
   scheduled.forEach(task => {
-    const dt = new Date(task.scheduled);
+    // Parse raw ISO string directly (avoid timezone conversion)
+    // Notion returns: "2026-06-08T10:00:00.000+00:00"
     const dateStr = task.scheduled.split('T')[0];
-    const hours = dt.getHours ? dt.getHours() : parseInt(task.scheduled.split('T')[1]);
-    const mins = dt.getMinutes ? dt.getMinutes() : parseInt(task.scheduled.split('T')[1]?.split(':')[1] || '0');
+    const timePart = task.scheduled.split('T')[1] || '00:00';
+    const hours = parseInt(timePart.split(':')[0]) || 0;
+    const mins = parseInt(timePart.split(':')[1]) || 0;
 
     // Find which day column
-    const dayDiff = Math.floor((new Date(dateStr) - calWeekStart) / 86400000);
+    const dayDiff = Math.round((new Date(dateStr) - new Date(calWeekStart.toISOString().split('T')[0])) / 86400000);
     if (dayDiff < 0 || dayDiff > 6) return;
 
     const slotIndex = (hours - CAL_START_HOUR) * 2 + Math.floor(mins / 30);
@@ -653,12 +663,12 @@ function updateCalNowLine() {
   document.querySelectorAll('.cal-now-line').forEach(el => el.remove());
 
   const now = new Date();
-  const today = now.toISOString().split('T')[0];
+  const today = localDateStr(now);
   const h = now.getHours();
   const m = now.getMinutes();
   if (h < CAL_START_HOUR || h >= CAL_END_HOUR) return;
 
-  const dayDiff = Math.floor((new Date(today) - calWeekStart) / 86400000);
+  const dayDiff = Math.round((new Date(today) - new Date(calWeekStart.toISOString().split('T')[0])) / 86400000);
   if (dayDiff < 0 || dayDiff > 6) return;
 
   const totalMins = (h - CAL_START_HOUR) * 60 + m;
@@ -693,15 +703,16 @@ function openScheduleModal(task) {
   const overlay = $('cal-modal-overlay');
 
   if (task.scheduled) {
-    const dt = new Date(task.scheduled);
+    // Parse raw ISO string (avoid timezone conversion)
     $('cal-modal-date').value = task.scheduled.split('T')[0];
-    const h = String(dt.getHours()).padStart(2, '0');
-    const m = String(dt.getMinutes()).padStart(2, '0');
+    const timePart = task.scheduled.split('T')[1] || '00:00';
+    const h = timePart.split(':')[0].padStart(2, '0');
+    const m = timePart.split(':')[1]?.substring(0, 2).padStart(2, '0') || '00';
     $('cal-modal-time').value = `${h}:${m}`;
   } else {
     // Default to today + next half-hour
     const now = new Date();
-    $('cal-modal-date').value = now.toISOString().split('T')[0];
+    $('cal-modal-date').value = localDateStr(now);
     const nextH = now.getMinutes() < 30 ? now.getHours() : now.getHours() + 1;
     const nextM = now.getMinutes() < 30 ? '30' : '00';
     $('cal-modal-time').value = `${String(nextH).padStart(2, '0')}:${nextM}`;
