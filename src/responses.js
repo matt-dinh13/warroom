@@ -77,10 +77,24 @@ export function buildTriageResponse(tasks) {
 }
 
 // ─── Completion ─────────────────────────────────────────
-export function buildCompletionResponse(task, remainingCount) {
-  let r = `✅ Done: "${task.title}"`;
+export function buildCompletionResponse(task, remainingCount, remainingTasks) {
+  // Sarcastic roast lines
+  const roasts = [
+    `Cuối cùng cũng xong "${task.title}".`,
+    `"${task.title}" — tưởng quên rồi chứ.`,
+    `Done "${task.title}". Không tệ.`,
+    `"${task.title}" ✓. Dễ mà, sao lâu vậy?`,
+    `Xong "${task.title}" rồi. Khen thì hơi sớm.`,
+  ];
+  let r = `✅ ${roasts[Math.floor(Math.random() * roasts.length)]}`;
   if (remainingCount !== undefined) {
     r += `\n📋 Còn ${remainingCount} task.`;
+  }
+  // Suggest next task
+  if (remainingTasks && remainingTasks.length > 0) {
+    const next = remainingTasks[0];
+    const est = next.estimate ? ` (~${next.estimate}p)` : '';
+    r += `\n\n👉 Tiếp: ${next.urgency || '🟡'} ${next.title}${est}`;
   }
   r += `\n\n💡 Gõ "plan" để xem task tiếp.`;
   return r;

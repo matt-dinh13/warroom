@@ -1,6 +1,6 @@
-// Triage v5.0 — Slim orchestrator (was 717 lines, now ~150)
+// Triage v5.2 — Agentic orchestrator (sarcastic, context-aware)
 // Phase 1: Instant commands (regex, <1s)
-// Phase 2: AI-powered (MiniMax, 5-15s)
+// Phase 2: AI-powered (MiniMax, 5-15s) with task context injection
 // Phase 3: Fallback parsers (when AI returns plain text)
 
 import { callMiniMax } from './minimax.js';
@@ -59,7 +59,27 @@ export async function processChat(userMessage, env, chatId = 'web') {
 
   // ═══ PHASE 2: AI-Powered ═══════
   const { dateContext } = getVNContext();
-  const enrichedMessage = `${dateContext}\n${msg}`;
+
+  // Build task context for agentic awareness
+  let taskCtx = '';
+  try {
+    const [todayTasks, overdueTasks] = await Promise.all([
+      queryTasks('today', env),
+      queryTasks('overdue', env),
+    ]);
+    const todayCount = todayTasks?.length || 0;
+    const overdueCount = overdueTasks?.length || 0;
+    const totalEst = (todayTasks || []).reduce((s, t) => s + (t.estimate || 0), 0);
+    taskCtx = `\n[📊 Workload: ${todayCount} tasks hôm nay (~${Math.round(totalEst / 60)}h), ${overdueCount} overdue]`;
+    if (overdueCount > 0 && overdueTasks[0]) {
+      const daysSince = overdueTasks[0].due_date
+        ? Math.floor((Date.now() - new Date(overdueTasks[0].due_date).getTime()) / 86400000)
+        : '?';
+      taskCtx += `\n[🔴 Overdue: "${overdueTasks[0].title}" (quá ${daysSince} ngày)]`;
+    }
+  } catch {}
+
+  const enrichedMessage = `${dateContext}${taskCtx}\n${msg}`;
   const history = await getConversation(chatId, env);
   const messages = [
     { role: 'system', content: SYSTEM_PROMPT },
@@ -99,7 +119,15 @@ export async function processChat(userMessage, env, chatId = 'web') {
             responseText = `✅ Đã tạo + chia nhỏ:\n📌 ${parent.title}\n📦 ${action.data.subtasks.length} sub-tasks\n\n💡 Gõ "plan" để xem.`;
           } else {
             notionResult = await createTask(taskData, env);
-            responseText = buildCaptureConfirmation(taskData);
+            // Check overload
+            let overloadWarning = '';
+            try {
+              const todayCount = (await queryTasks('today', env))?.length || 0;
+              if (todayCount > 6) {
+                overloadWarning = `\n\n⚠️ ${todayCount} tasks rồi đó, thêm nữa tính ở lại đêm à?`;
+              }
+            } catch {}
+            responseText = buildCaptureConfirmation(taskData) + overloadWarning;
           }
           break;
         }
@@ -124,7 +152,7 @@ export async function processChat(userMessage, env, chatId = 'web') {
               responseText = `❌ Không tìm thấy "${action.data.task_title}".`;
             } else {
               const remaining = await queryTasks('today', env);
-              responseText = buildCompletionResponse(notionResult, remaining.length);
+              responseText = buildCompletionResponse(notionResult, remaining.length, remaining);
             }
           }
           break;
@@ -169,7 +197,7 @@ export async function processChat(userMessage, env, chatId = 'web') {
           if (result) {
             notionResult = result;
             const remaining = await queryTasks('today', env);
-            responseText = buildCompletionResponse(result, remaining.length);
+            responseText = buildCompletionResponse(result, remaining.length, remaining);
           }
         } catch (err) {
           console.error('Update fallback error:', err);
@@ -198,5 +226,20 @@ export async function processChat(userMessage, env, chatId = 'web') {
   const finalHistory = [...updatedHistory, { role: 'assistant', content: responseText }];
   await saveConversation(chatId, finalHistory, env);
 
-  return buildResult(aiResult.intent || 'CLARIFY', responseText, Array.isArray(notionResult) ? notionResult.length : undefined);
+  // ═══ Intent auto-correction ═══════
+  // MiniMax often returns intent=CLARIFY even when it performed an action
+  let finalIntent = aiResult.intent || 'CLARIFY';
+  if (finalIntent === 'CLARIFY' && action && notionResult) {
+    const intentMap = {
+      'create': 'CAPTURE',
+      'create_batch': 'CAPTURE_BATCH',
+      'update': 'UPDATE',
+      'edit': 'EDIT',
+      'delete': 'DELETE',
+      'query': 'LIST_TASKS',
+    };
+    finalIntent = intentMap[action.type] || finalIntent;
+  }
+
+  return buildResult(finalIntent, responseText, Array.isArray(notionResult) ? notionResult.length : undefined);
 }

@@ -82,14 +82,14 @@ export async function executeInstantCommand(cmd, env, chatId, getLastPlan, saveL
       const result = await updateTaskStatus(lastPlan[idx].title, 'Completed', env);
       if (!result) return buildResult('UPDATE', `❌ Không tìm thấy "${lastPlan[idx].title}".`);
       const remaining = await queryTasks('today', env);
-      return buildResult('UPDATE', buildCompletionResponse(result, remaining.length));
+      return buildResult('UPDATE', buildCompletionResponse(result, remaining.length, remaining));
     }
     case 'done_name': {
       const taskName = cmd.match[1].trim();
       const result = await updateTaskStatus(taskName, 'Completed', env);
       if (!result) return buildResult('UPDATE', `❌ Không tìm thấy "${taskName}".`);
       const remaining = await queryTasks('today', env);
-      return buildResult('UPDATE', buildCompletionResponse(result, remaining.length));
+      return buildResult('UPDATE', buildCompletionResponse(result, remaining.length, remaining));
     }
     default:
       return null;
