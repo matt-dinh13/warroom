@@ -684,11 +684,8 @@ body {
 }
 .cal-modal-remove:hover { color: var(--fire); border-color: var(--fire); }
 
-/* Calendar tab-view layout */
-#calendar-view {
-  display: flex; flex-direction: column;
-}
-#calendar-view.active { display: flex; }
+/* Calendar tab-view layout — inherits display:none from .tab-view */
+#calendar-view.active { display: flex; flex-direction: column; }
 
 /* Responsive: calendar on tablet fills screen */
 @media (min-width: 768px) {
