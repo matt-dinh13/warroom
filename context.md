@@ -1,7 +1,7 @@
 # 🚀 Stratt — Project Context
 
 > File này chứa đủ context để developer mới (hoặc AI agent) tiếp tục phát triển mà không cần hỏi lại.
-> Cập nhật lần cuối: 2026-06-07 (v5.1)
+> Cập nhật lần cuối: 2026-06-08 (v5.2)
 
 ---
 
@@ -12,7 +12,8 @@
 **Flow:** Chat input → Instant Regex commands HOẶC MiniMax AI parse → Notion CRUD → trả kết quả.
 
 **Key UX:**
-- AI nhớ ngữ cảnh hội thoại (5 tin nhắn, KV memory)
+- AI nhớ ngữ cảnh hội thoại (5 tin nhắn, KV memory) + task context injection
+- AI personality: sarcastic, proactive (warn overdue/overload)
 - **Kanban Board** tab: 4 cột (To Do, In Progress, Pending, Done Today), filter + quick add
 - **Calendar Timeblock** tab: Week view 7:00–23:00, 30-min blocks, tap-to-schedule
 - Instant commands (~60% messages skip AI, <1s response)
@@ -43,11 +44,11 @@ Cloudflare Worker (src/index.js)
   ├→ Rate Limiter (30 req/min per IP)
   ├→ src/auth.js          — SHA-256 password gate + Secure cookies + Logout
   ├→ src/commands.js      — Instant regex commands (plan, list, overdue, etc.)
-  ├→ src/triage.js        — Slim orchestrator + memory management
+  ├→ src/triage.js        — Agentic orchestrator + memory + context injection + intent correction
   │    ├→ src/minimax.js    — MiniMax-M2.7 (timeout + retry)
   │    ├→ src/notion.js     — Notion CRUD + pagination + retry-backoff
-  │    ├→ src/prompts.js    — Compact prompts + few-shot examples
-  │    ├→ src/responses.js  — Response builders (all build*Response)
+  │    ├→ src/prompts.js    — Sarcastic prompt (v5.2) + 11 few-shot examples
+  │    ├→ src/responses.js  — Response builders (sarcastic roast + next-task suggestion)
   │    └→ src/parsers.js    — Fallback JSON parsers
   ├→ src/telegram.js      — Webhook + inline keyboard + HTML parse mode
   ├→ src/reminders.js     — Smart cron (skip logic, no gamification)
@@ -127,14 +128,17 @@ stratt/  (local dir: warroom/)
 ├── DEPLOY_GUIDE.md         # Step-by-step deploy guide
 ├── test-full.sh            # Integration test suite (35 tests)
 ├── test-ui.sh              # UI structure validation (70 tests)
+├── test-calendar.sh        # Calendar + Logout tests (41 tests)
+├── test-agent.sh           # AI agent stress test (25 tests: adversarial, slang, edge cases)
+├── test-browser.mjs        # Puppeteer Chrome E2E (35 tests)
 ├── src/
 │   ├── index.js            # Worker entry — routes + rate limiter
 │   ├── auth.js             # SHA-256 auth (login + logout)
 │   ├── commands.js         # Instant regex commands (9 patterns)
 │   ├── minimax.js          # MiniMax-M2.7 client (timeout + retry)
 │   ├── notion.js           # Notion CRUD + pagination + retry-backoff
-│   ├── triage.js           # Slim orchestrator + KV memory
-│   ├── prompts.js          # Compact system prompt + few-shot
+│   ├── triage.js           # Agentic orchestrator + context injection + intent fix
+│   ├── prompts.js          # Sarcastic prompt v5.2 + 11 few-shot + intent alignment
 │   ├── responses.js        # Response builders (buildTriage, etc.)
 │   ├── parsers.js          # Fallback JSON parsers
 │   ├── telegram.js         # Webhook + inline keyboard
@@ -245,3 +249,4 @@ TELEGRAM_CHAT_ID    — Matt's Telegram chat ID
 | 4.1 | 2026-05-18 | Disabled regex (false positives), AI-only |
 | **5.0** | **2026-06-07** | **Major rewrite — kanban, Phong Thủy, no gamification** |
 | **5.1** | **2026-06-07** | **Calendar timeblock, logout, anti-autofill** |
+| **5.2** | **2026-06-08** | **Agentic upgrade — sarcastic personality, context injection, intent correction, 25 stress tests** |

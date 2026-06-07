@@ -4,6 +4,82 @@
 
 ---
 
+## 2026-06-08 — v5.2 Agentic Upgrade (Sarcastic Personality + Context Awareness)
+
+### Changes Made
+
+#### System Prompt Rewrite (prompts.js)
+| Aspect | Before (v5.0) | After (v5.2) |
+|--------|--------------|-------------|
+| Personality | Robot — chỉ trả JSON | Sarcastic — roast on done, warn on overload |
+| Few-shot examples | 5 | 11 (added batch, slang, English, delete) |
+| Intent rules | Implicit | Explicit INTENT ALIGNMENT section |
+| Vietnamese slang | Not documented | "ê", "nha", "r", "ko", "thằng" recognized |
+| Tone guidance | "Ngắn gọn, trực diện" | "Nói như bạn thân, hơi sarcastic, KHÔNG nói 'Tôi là AI'" |
+
+#### Triage v5.2 (triage.js)
+| Feature | Description |
+|---------|-------------|
+| Task context injection | Before each AI call: `[📊 Workload: 5 tasks (~3h), 2 overdue]` |
+| Intent auto-correction | MiniMax returns CLARIFY → auto-fix to CAPTURE/UPDATE based on action |
+| Fallback intent fix | Covers both AI action path AND fallback parser path |
+| Overload warning | >6 tasks/day → "thêm nữa tính ở lại đêm à?" |
+
+#### Sarcastic Completion (responses.js)
+| Feature | Description |
+|---------|-------------|
+| Random roast | 5 lines: "tưởng quên rồi chứ", "Khen thì hơi sớm", etc. |
+| Next-task suggestion | "👉 Tiếp: 🟡 Research Upgrade KV (~120p)" |
+| `buildCompletionResponse` | Now accepts `remainingTasks` array for suggestion |
+
+#### AI Agent Stress Test (test-agent.sh — NEW)
+| Category | Tests | Description |
+|----------|-------|-------------|
+| Task Creation | 9 | Vietnamese implicit, urgency, batch, materials, split |
+| Adversarial | 6 | Prompt injection, API key, jailbreak, SQL, password, XSS |
+| Edge Cases | 4 | Done without plan, done 999, invalid chars, long message |
+| Vietnamese Slang | 6 | "ê", "thằng", "xong r", "ko cần", English, emoji |
+
+### Technical Decisions
+
+#### D1: Intent Auto-Correction Strategy
+- **Decision:** Auto-fix intent in triage.js, not in prompt
+- **Reason:** MiniMax-M2.7 consistently returns `intent: "CLARIFY"` even with explicit alignment rules. Model-level limitation.
+- **Impact:** Tests improved 17→19 pass, 8→6 warnings.
+
+#### D2: Proactive Level = Moderate (B)
+- **Decision:** Warn on overdue + overload only, NOT every message
+- **Reason:** User has ADHD — too many notifications = annoying. Moderate = helpful without being nagging.
+
+#### D3: Sarcastic Personality (C)
+- **Decision:** Sarcastic/funny tone — "Lại quên deadline à?", "tưởng quên rồi chứ"
+- **Reason:** User chose freestyle. Keeps interaction engaging without gamification.
+- **Risk:** Monitored — can dial back if annoying.
+
+#### D4: Fuzzy Match = Always Confirm
+- **Decision:** When multiple tasks match, always ask user to confirm (not auto-pick)
+- **Status:** Deferred to v5.3 — need proper fuzzy search implementation.
+
+### Test Results (Production)
+
+| Suite | v5.0 Baseline | v5.2 Final | Delta |
+|-------|:---:|:---:|:---:|
+| **Agent Stress** (25 tests) | 17 pass / 8 warn | **19 pass / 6 warn** | +2 / -2 |
+| **Security** (6 tests) | 6/6 ✅ | 6/6 ✅ | — |
+| **API Integration** (35) | 35/35 ✅ | — | unchanged |
+| **Calendar + Logout** (41) | 41/41 ✅ | — | unchanged |
+| **Browser E2E** (35) | 35/35 ✅ | — | unchanged |
+
+### Remaining Warnings (6)
+1. T1: Conversation memory pollution — AI interprets "phải xong" as UPDATE
+2. T2: AI response text doesn't trigger fallback pattern match
+3. T3: MiniMax doesn't reliably return `create_batch`
+4. T4: Materials fallback not matched
+5. T16: "xong hết" not matched by regex
+6. T17: Test assertion pattern mismatch
+
+---
+
 ## 2026-06-07 — v5.1 Calendar Timeblock + Logout + Security
 
 ### Changes Made
