@@ -1,10 +1,10 @@
 // Worker entry point — route API requests
 
-import { isAuthenticated, handleLogin } from './auth.js';
+import { isAuthenticated, handleLogin, handleLogout } from './auth.js';
 import { processChat } from './triage.js';
 import { handleTelegramWebhook, setTelegramWebhook } from './telegram.js';
 import { handleScheduled } from './reminders.js';
-import { backfillDoDate } from './notion.js';
+import { backfillDoDate, queryTasks, createTask, updateTaskStatusById } from './notion.js';
 
 // ─── Security: Never leak secrets in any response ───────────
 const SECRET_KEYS = ['MINIMAX_API_KEY', 'NOTION_API_KEY', 'NOTION_TASKS_DB_ID', 'NOTION_DAILY_DB_ID', 'APP_PASSWORD', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'];
@@ -95,6 +95,17 @@ export default {
           });
         }
 
+        // POST /api/logout — Logout (clear cookie)
+        if (path === '/api/logout' && request.method === 'POST') {
+          const response = handleLogout();
+          const newHeaders = new Headers(response.headers);
+          Object.entries(corsHeaders).forEach(([k, v]) => newHeaders.set(k, v));
+          return new Response(response.body, {
+            status: response.status,
+            headers: newHeaders,
+          });
+        }
+
         // POST /api/chat — Main chat endpoint (requires auth)
         if (path === '/api/chat' && request.method === 'POST') {
           if (!(await isAuthenticated(request, env))) {
@@ -139,10 +150,84 @@ export default {
             JSON.stringify({
               status: 'ok',
               timestamp: new Date().toISOString(),
-              version: '2.0.0',
+              version: '5.0.0',
               telegram: !!env.TELEGRAM_BOT_TOKEN,
               cron: true,
             }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // ─── Board API Endpoints ─────────────────────────
+
+        // GET /api/tasks — Fetch all tasks for kanban board
+        if (path === '/api/tasks' && request.method === 'GET') {
+          if (!(await isAuthenticated(request, env))) {
+            return new Response(
+              JSON.stringify({ error: 'Unauthorized' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          const [active, doneToday, materials] = await Promise.all([
+            queryTasks('board_all', env),
+            queryTasks('board_done_today', env),
+            queryTasks('materials', env),
+          ]);
+          return new Response(
+            JSON.stringify({ active, doneToday, materials }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // POST /api/tasks/create — Quick add (no AI)
+        if (path === '/api/tasks/create' && request.method === 'POST') {
+          if (!(await isAuthenticated(request, env))) {
+            return new Response(
+              JSON.stringify({ error: 'Unauthorized' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          const body = await request.json();
+          if (!body.title?.trim()) {
+            return new Response(
+              JSON.stringify({ error: 'Title is required' }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          const taskData = {
+            title: body.title.trim(),
+            project: body.project || 'PERSONAL',
+            urgency: body.project === 'MATERIALS' ? '⚪ Someday' : (body.urgency || '🟡 Important'),
+            energy: '🔋 Med',
+            source: body.source || 'EIT',
+          };
+          if (body.deadline) taskData.due_date = body.deadline;
+          if (body.resource) taskData.resource = body.resource;
+          const result = await createTask(taskData, env);
+          return new Response(
+            JSON.stringify({ success: true, task: result }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // POST /api/tasks/update — Update status by page ID
+        if (path === '/api/tasks/update' && request.method === 'POST') {
+          if (!(await isAuthenticated(request, env))) {
+            return new Response(
+              JSON.stringify({ error: 'Unauthorized' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          const body = await request.json();
+          if (!body.id || !body.status) {
+            return new Response(
+              JSON.stringify({ error: 'id and status are required' }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          const result = await updateTaskStatusById(body.id, body.status, env);
+          return new Response(
+            JSON.stringify({ success: true, task: result }),
             { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }

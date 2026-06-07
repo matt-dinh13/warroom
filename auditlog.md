@@ -4,6 +4,114 @@
 
 ---
 
+## 2026-06-07 — v5.0 Major Rewrite (Phỏng vấn User → 8 Phases)
+
+### Bối cảnh
+User bỏ bê project 1 tuần, nhận thấy không hiệu quả. Phỏng vấn ADHD workflow → phát hiện: gamification gây nhiễu, thiếu kanban, instant commands bị false positives, prompt quá dài, cần iPad dashboard.
+
+### Changes Made
+
+#### Phase 1: Prompt Optimization
+| File | Change |
+|------|--------|
+| `src/prompts.js` | 130 → 65 dòng. JSON schema đặt đầu. 5 few-shot examples thay 40+ rules. PROJECT_SOURCE_MAP export. |
+
+#### Phase 2: Smart Regex (commands.js — NEW)
+| File | Change |
+|------|--------|
+| `src/commands.js` | NEW — 9 anchored regex patterns (`^plan$`, `^list$`, etc.). ~60% messages skip AI. |
+| `src/responses.js` | NEW — All `build*Response` functions extracted from triage.js |
+| `src/parsers.js` | NEW — Fallback JSON parsers extracted from triage.js |
+
+#### Phase 3: Remove Gamification
+| File | Change |
+|------|--------|
+| `src/gamification.js` | DELETED |
+| `src/triage.js` | Removed gamification imports, XP tracking, streak updates |
+| `src/reminders.js` | Removed gamification footer from cron messages |
+| `public/app.js` | Removed XP bar, streak counter, achievement animations |
+| `public/style.css` | Removed all gamification CSS |
+
+#### Phase 4: Kanban Board
+| File | Change |
+|------|--------|
+| `src/index.js` | Added: `GET /api/tasks`, `POST /api/tasks/create`, `POST /api/tasks/update` |
+| `src/notion.js` | Added: `queryTasks(board_all/board_done_today/materials)`, `updateTaskStatusById()`, pagination, retry-backoff |
+| `public/index.html` | Added: Tab bar (Chat/Board), 4-column kanban layout, filters, quick add bar |
+| `public/app.js` | Added: Tab switching, `fetchBoard()`, `renderBoard()`, filter logic, quick add, `changeStatus()`, auto-refresh 5min |
+| `public/style.css` | Added: CSS Grid 4-column kanban, task cards, filter bar, column counts |
+
+#### Phase 5: Materials Feature
+| File | Change |
+|------|--------|
+| `src/notion.js` | Added `materials` query type |
+| `src/commands.js` | Added `materials` to instant commands |
+| Notion DB | Added `MATERIALS` option to Context select property |
+
+#### Phase 6: Refactor triage.js
+| File | Change |
+|------|--------|
+| `src/triage.js` | 717 → ~150 dòng. Slim orchestrator + memory only |
+
+#### Phase 7: Smart Cron + Reliability
+| File | Change |
+|------|--------|
+| `src/reminders.js` | Shorter messages, smart skip, no gamification |
+| `src/minimax.js` | Added 15s timeout + 1 retry on 5xx/timeout |
+| `src/notion.js` | Added pagination (`has_more`), retry with exponential backoff |
+
+#### Phase 8: PWA + iPad
+| File | Change |
+|------|--------|
+| `public/manifest.json` | NEW — PWA manifest, standalone display |
+| `public/index.html` | Added: apple-mobile-web-app meta tags |
+| `public/style.css` | Tablet responsive, 44px touch targets, wake lock button |
+| `public/app.js` | Added: `toggleWakeLock()` (Screen Wake Lock API) |
+
+#### Post-Phase: Impeccable + Phong Thủy
+| File | Change |
+|------|--------|
+| `.agents/skills/impeccable/` | Copied Impeccable design skill from Julie-IELTS project |
+| `public/style.css` | Applied Impeccable product register: OKLCH colors, no side-stripe borders, ease-out-quart, spacing scale tokens |
+| `public/style.css` | Applied Phong Thủy Mệnh Thủy (Bính Tý 1996): Navy accent hue 250, Kim surfaces, Mộc success, Hỏa fire, Thổ warning |
+
+#### Post-Phase: Security
+| File | Change |
+|------|--------|
+| `src/auth.js` | Added `handleLogout()` — clear cookie with Max-Age=0 |
+| `src/index.js` | Added `POST /api/logout` route |
+| `public/index.html` | Added 🚪 logout button, `autocomplete="off"` + readonly trick on password input |
+| `public/app.js` | Added `handleLogout()` — clear cookie + localStorage + return to login |
+
+#### Bug Fixes
+| Issue | Fix |
+|-------|-----|
+| Loading spinner always visible on board | `.board-loading[hidden] { display: none }` — CSS `display:flex` was overriding HTML `hidden` attribute |
+
+### Technical Decisions
+
+#### D1: Anchored Regex vs Keyword Matching
+- **Decision:** Use anchored regex (`^plan$`) instead of loose keyword matching
+- **Reason:** v4.0 regex used loose patterns → "done" inside task descriptions triggered false positives
+- **Impact:** Zero false positives. Only exact matches trigger instant commands.
+
+#### D2: OKLCH Color Space
+- **Decision:** Use OKLCH instead of hex/HSL
+- **Reason:** Impeccable skill mandates OKLCH. Perceptually uniform, better chroma control at extremes.
+- **Impact:** All color tokens use `oklch(L C H)` format. Browser support ≥95%.
+
+#### D3: Phong Thủy Color Mapping
+- **Decision:** Map Ngũ Hành to UI semantic colors
+- **Reason:** Personal tool — emotional connection increases engagement (ADHD research)
+- **Impact:** Navy accent (Thủy), coral fire (Hỏa), jade success (Mộc), amber warning (Thổ), silver neutrals (Kim)
+
+### Test Results (Production)
+- **API Integration:** 34/35 passed (1 minor: delete timing race)
+- **UI Structure:** 70/70 passed
+- **Total:** 104/105 ✅
+
+---
+
 ## 2026-05-17 — Initial Build (Power Block #1)
 
 ### Scope

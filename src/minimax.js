@@ -21,7 +21,9 @@ export async function callMiniMax(systemPrompt, userMessage, apiKey, messages = 
     { role: 'user', content: userMessage },
   ];
 
-  const response = await fetch(`${MINIMAX_BASE_URL}/chat/completions`, {
+  // Fetch with 15s timeout + 1 retry
+  let response;
+  const fetchOpts = {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -33,11 +35,33 @@ export async function callMiniMax(systemPrompt, userMessage, apiKey, messages = 
       temperature: 0.3,
       response_format: { type: 'json_object' },
     }),
-  });
+  };
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`MiniMax API error ${response.status}: ${errorText}`);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      response = await fetch(`${MINIMAX_BASE_URL}/chat/completions`, {
+        ...fetchOpts,
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (response.ok) break;
+      if (response.status >= 500 && attempt === 0) {
+        console.warn(`MiniMax 5xx, retrying... (${response.status})`);
+        await new Promise(r => setTimeout(r, 1000));
+        continue;
+      }
+      const errorText = await response.text();
+      throw new Error(`MiniMax API error ${response.status}: ${errorText}`);
+    } catch (err) {
+      clearTimeout(timeout);
+      if (err.name === 'AbortError' && attempt === 0) {
+        console.warn('MiniMax timeout, retrying...');
+        continue;
+      }
+      throw err;
+    }
   }
 
   const data = await response.json();

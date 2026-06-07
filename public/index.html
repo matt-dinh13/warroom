@@ -2,8 +2,14 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="description" content="Stratt — AI Task Commander for ADHD productivity">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Stratt">
+  <meta name="theme-color" content="#0a0a1a">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icon-192.png">
   <title>🚀 Stratt</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -25,7 +31,11 @@
             type="password"
             id="auth-password"
             placeholder="Enter password..."
-            autocomplete="current-password"
+            autocomplete="off"
+            data-lpignore="true"
+            data-1p-ignore
+            readonly
+            onfocus="this.removeAttribute('readonly')"
             required
           >
           <button type="submit" id="auth-submit">
@@ -39,71 +49,154 @@
     <div class="auth-particles"></div>
   </div>
 
-  <!-- ═══ MAIN CHAT ═══ -->
-  <div id="chat-screen" class="screen">
+  <!-- ═══ MAIN APP ═══ -->
+  <div id="app-screen" class="screen">
     <!-- Header -->
-    <header class="chat-header">
+    <header class="app-header">
       <div class="header-left">
         <span class="header-icon">🚀</span>
-        <div>
-          <h1>Stratt</h1>
-          <span class="header-status" id="header-status">
-            <span class="status-dot"></span>
-            Online
-          </span>
-        </div>
+        <h1>Stratt</h1>
+      </div>
+      <div class="header-tabs">
+        <button class="tab-btn active" data-tab="chat" id="tab-chat">💬 Chat</button>
+        <button class="tab-btn" data-tab="board" id="tab-board">📋 Board</button>
       </div>
       <div class="header-right">
         <span class="header-time" id="header-time"></span>
+        <button class="icon-btn" id="btn-wake-lock" title="Keep screen on">🔅</button>
+        <button class="icon-btn" id="btn-logout" title="Logout">🚪</button>
       </div>
     </header>
 
-    <!-- Messages -->
-    <main class="chat-messages" id="chat-messages">
-      <div class="message bot">
-        <div class="message-avatar">🤖</div>
-        <div class="message-content">
-          <p>Chào Matt! 👋 Gõ task để capture, hoặc dùng quick actions bên dưới. <i>"I'm reasonably sure this will work."</i></p>
+    <!-- ═══ CHAT TAB ═══ -->
+    <div id="chat-view" class="tab-view active">
+      <!-- Messages -->
+      <main class="chat-messages" id="chat-messages">
+        <div class="message bot">
+          <div class="message-avatar">🤖</div>
+          <div class="message-content">
+            <p>Chào Matt! 👋 Gõ task để capture, hoặc dùng quick actions. <i>"I'm reasonably sure this will work."</i></p>
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
 
-    <!-- Quick Actions -->
-    <div class="quick-actions">
-      <button class="quick-btn" data-action="plan today" id="btn-plan-today">
-        <span class="quick-icon">📋</span>
-        <span>Plan Today</span>
-      </button>
-      <button class="quick-btn" data-action="check load" id="btn-check-load">
-        <span class="quick-icon">📊</span>
-        <span>Check Load</span>
-      </button>
-      <button class="quick-btn" data-action="bỏ quên gì không?" id="btn-overdue">
-        <span class="quick-icon">⚠️</span>
-        <span>Overdue</span>
-      </button>
-      <button class="quick-btn" data-action="summary tuần" id="btn-report">
-        <span class="quick-icon">📈</span>
-        <span>Report</span>
-      </button>
-    </div>
-
-    <!-- Input -->
-    <form class="chat-input-area" id="chat-form">
-      <div class="input-wrapper">
-        <textarea
-          id="chat-input"
-          placeholder="Gõ task, câu hỏi, hoặc command..."
-          rows="1"
-          maxlength="2000"
-        ></textarea>
-        <button type="submit" id="chat-submit" class="send-btn" disabled>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
-          </svg>
+      <!-- Quick Actions -->
+      <div class="quick-actions">
+        <button class="quick-btn" data-action="plan" id="btn-plan-today">
+          <span class="quick-icon">📋</span><span>Plan</span>
+        </button>
+        <button class="quick-btn" data-action="list" id="btn-list">
+          <span class="quick-icon">📊</span><span>List</span>
+        </button>
+        <button class="quick-btn" data-action="overdue" id="btn-overdue">
+          <span class="quick-icon">⚠️</span><span>Overdue</span>
+        </button>
+        <button class="quick-btn" data-action="materials" id="btn-materials">
+          <span class="quick-icon">📚</span><span>Materials</span>
         </button>
       </div>
-    </form>
+
+      <!-- Input -->
+      <form class="chat-input-area" id="chat-form">
+        <div class="input-wrapper">
+          <textarea
+            id="chat-input"
+            placeholder="Gõ task, command, hoặc link..."
+            rows="1"
+            maxlength="2000"
+          ></textarea>
+          <button type="submit" id="chat-submit" class="send-btn" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+            </svg>
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- ═══ BOARD TAB ═══ -->
+    <div id="board-view" class="tab-view">
+      <!-- Board Toolbar -->
+      <div class="board-toolbar">
+        <div class="board-filters">
+          <select id="filter-project" class="board-filter">
+            <option value="all">All Projects</option>
+            <option value="GMA">GMA</option>
+            <option value="HOSEL">HOSEL</option>
+            <option value="SALES">SALES</option>
+            <option value="EMPULSE">EMPULSE</option>
+            <option value="KV">KV</option>
+            <option value="EDU">EDU</option>
+            <option value="TEACH">TEACH</option>
+            <option value="LEARN">LEARN</option>
+            <option value="PERSONAL">PERSONAL</option>
+            <option value="MATERIALS">📚 Materials</option>
+          </select>
+          <select id="filter-urgency" class="board-filter">
+            <option value="all">All Urgency</option>
+            <option value="🔴 Fire">🔴 Fire</option>
+            <option value="🟡 Important">🟡 Important</option>
+            <option value="🟢 Wait">🟢 Wait</option>
+            <option value="⚪ Someday">⚪ Someday</option>
+          </select>
+          <button class="icon-btn" id="btn-refresh-board" title="Refresh">🔄</button>
+        </div>
+        <div class="board-quick-add">
+          <input type="text" id="quick-add-title" placeholder="Quick add task..." class="quick-add-input">
+          <select id="quick-add-project" class="board-filter">
+            <option value="GMA">GMA</option>
+            <option value="HOSEL">HOSEL</option>
+            <option value="SALES">SALES</option>
+            <option value="EMPULSE">EMPULSE</option>
+            <option value="KV">KV</option>
+            <option value="EDU">EDU</option>
+            <option value="TEACH">TEACH</option>
+            <option value="LEARN">LEARN</option>
+            <option value="PERSONAL">PERSONAL</option>
+            <option value="MATERIALS">📚 Materials</option>
+          </select>
+          <button id="btn-quick-add" class="quick-add-btn">+ Add</button>
+        </div>
+      </div>
+
+      <!-- Kanban Columns -->
+      <div class="kanban-board" id="kanban-board">
+        <div class="kanban-column" data-status="To do">
+          <div class="column-header">
+            <span class="column-title">📋 To Do</span>
+            <span class="column-count" id="count-todo">0</span>
+          </div>
+          <div class="column-cards" id="cards-todo"></div>
+        </div>
+        <div class="kanban-column" data-status="In progress">
+          <div class="column-header">
+            <span class="column-title">🔥 In Progress</span>
+            <span class="column-count" id="count-progress">0</span>
+          </div>
+          <div class="column-cards" id="cards-progress"></div>
+        </div>
+        <div class="kanban-column" data-status="Pending">
+          <div class="column-header">
+            <span class="column-title">⏳ Pending</span>
+            <span class="column-count" id="count-pending">0</span>
+          </div>
+          <div class="column-cards" id="cards-pending"></div>
+        </div>
+        <div class="kanban-column done-column" data-status="Completed">
+          <div class="column-header">
+            <span class="column-title">✅ Done Today</span>
+            <span class="column-count" id="count-done">0</span>
+          </div>
+          <div class="column-cards" id="cards-done"></div>
+        </div>
+      </div>
+
+      <!-- Board Loading -->
+      <div class="board-loading" id="board-loading" hidden>
+        <div class="spinner"></div>
+        <span>Loading tasks...</span>
+      </div>
+    </div>
   </div>
 
   <script src="/app.js"></script>

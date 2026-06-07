@@ -116,28 +116,31 @@ export async function createTask(taskData, env) {
   return await response.json();
 }
 
+// ─── Retry with backoff (Notion rate limit: 3 req/s) ────
+async function fetchWithRetry(url, options, maxRetries = 2) {
+  for (let i = 0; i <= maxRetries; i++) {
+    const res = await fetch(url, options);
+    if (res.ok) return res;
+    if (res.status === 429 && i < maxRetries) {
+      await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+      continue;
+    }
+    const err = await res.text();
+    throw new Error(`Notion API ${res.status}: ${err}`);
+  }
+}
+
 /**
- * Query tasks from Notion with filters
- * @param {string} queryType - "today" | "upcoming" | "overdue" | "all_active" | "weekly_report" | "backlog"
- *
- * Query philosophy (ADHD-optimized):
- * - User doesn't care about To do vs In progress — only "done" vs "not done"
- * - "today" = tasks due today or overdue (what needs attention NOW)
- * - "upcoming" = tasks due in next 7 days (planning view)
- * - "all_active" = everything not completed (for LIST_TASKS)
- * - "backlog" = Someday items or no deadline (ideas, links, low priority)
+ * Query tasks from Notion with filters + pagination
+ * @param {string} queryType - "today" | "upcoming" | "overdue" | "all_active" | "weekly_report" | "backlog" | "materials" | "board_all" | "board_done_today"
  */
 export async function queryTasks(queryType, env) {
   let filter;
   const today = new Date().toISOString().split('T')[0];
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
   const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
 
   switch (queryType) {
     case 'today':
-      // Tasks that need attention TODAY:
-      // - Deadline or Do Date is today or earlier AND not completed
-      // Simple approach: just check both date fields
       filter = {
         and: [
           { property: 'State', status: { does_not_equal: 'Completed' } },
@@ -152,7 +155,6 @@ export async function queryTasks(queryType, env) {
       break;
 
     case 'upcoming':
-      // Tasks due in the next 7 days (after today, before next week)
       filter = {
         and: [
           { property: 'State', status: { does_not_equal: 'Completed' } },
@@ -177,7 +179,6 @@ export async function queryTasks(queryType, env) {
       break;
 
     case 'overdue':
-      // Tasks past deadline and NOT completed
       filter = {
         and: [
           { property: 'State', status: { does_not_equal: 'Completed' } },
@@ -192,7 +193,6 @@ export async function queryTasks(queryType, env) {
       break;
 
     case 'all_active':
-      // All tasks not completed, excluding Someday (those go to backlog)
       filter = {
         and: [
           { property: 'State', status: { does_not_equal: 'Completed' } },
@@ -201,8 +201,28 @@ export async function queryTasks(queryType, env) {
       };
       break;
 
-    case 'weekly_report':
-      // Completed tasks this week (last 7 days)
+    case 'board_all':
+      // For kanban board: all non-completed tasks INCLUDING Someday (but not MATERIALS)
+      filter = {
+        and: [
+          { property: 'State', status: { does_not_equal: 'Completed' } },
+          { property: 'Context', select: { does_not_equal: 'MATERIALS' } },
+        ],
+      };
+      break;
+
+    case 'board_done_today': {
+      // For kanban Done column: completed today
+      filter = {
+        and: [
+          { property: 'State', status: { equals: 'Completed' } },
+          { property: 'Deadline', date: { on_or_after: today } },
+        ],
+      };
+      break;
+    }
+
+    case 'weekly_report': {
       const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
       filter = {
         and: [
@@ -211,9 +231,9 @@ export async function queryTasks(queryType, env) {
         ],
       };
       break;
+    }
 
     case 'backlog':
-      // Backlog: Someday urgency items (simple, reliable filter)
       filter = {
         and: [
           { property: 'State', status: { does_not_equal: 'Completed' } },
@@ -222,34 +242,69 @@ export async function queryTasks(queryType, env) {
       };
       break;
 
+    case 'materials':
+      // Materials: Context=MATERIALS, not completed
+      filter = {
+        and: [
+          { property: 'State', status: { does_not_equal: 'Completed' } },
+          { property: 'Context', select: { equals: 'MATERIALS' } },
+        ],
+      };
+      break;
+
     default:
       filter = undefined;
   }
 
-  const body = {
-    filter,
-    sorts: [
-      { property: 'Deadline', direction: 'ascending' },
-    ],
-    page_size: 100,
+  // Paginated query
+  let allResults = [];
+  let cursor = undefined;
+  do {
+    const body = {
+      filter,
+      sorts: [{ property: 'Deadline', direction: 'ascending' }],
+      page_size: 100,
+    };
+    if (cursor) body.start_cursor = cursor;
+
+    const response = await fetchWithRetry(
+      `${NOTION_BASE}/databases/${env.NOTION_TASKS_DB_ID}/query`,
+      {
+        method: 'POST',
+        headers: notionHeaders(env.NOTION_API_KEY),
+        body: JSON.stringify(body),
+      }
+    );
+
+    const data = await response.json();
+    allResults.push(...data.results);
+    cursor = data.has_more ? data.next_cursor : undefined;
+  } while (cursor);
+
+  return allResults.map(parseNotionTask);
+}
+
+/**
+ * Update task status by Notion page ID (for kanban board — no fuzzy search needed)
+ */
+export async function updateTaskStatusById(pageId, newStatus, env) {
+  const statusMap = {
+    'To do': 'To do',
+    'In progress': 'In progress',
+    'Completed': 'Completed',
+    'Pending': 'Pending / Wait for approved',
   };
+  const mapped = statusMap[newStatus] || newStatus;
 
-  const response = await fetch(
-    `${NOTION_BASE}/databases/${env.NOTION_TASKS_DB_ID}/query`,
-    {
-      method: 'POST',
-      headers: notionHeaders(env.NOTION_API_KEY),
-      body: JSON.stringify(body),
-    }
-  );
+  const response = await fetchWithRetry(`${NOTION_BASE}/pages/${pageId}`, {
+    method: 'PATCH',
+    headers: notionHeaders(env.NOTION_API_KEY),
+    body: JSON.stringify({
+      properties: { 'State': { status: { name: mapped } } },
+    }),
+  });
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Notion query error ${response.status}: ${err}`);
-  }
-
-  const data = await response.json();
-  return data.results.map(parseNotionTask);
+  return parseNotionTask(await response.json());
 }
 
 // ─── Fuzzy Search ────────────────────────────────────
