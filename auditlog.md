@@ -4,7 +4,56 @@
 
 ---
 
+## 2026-06-07 — v5.1 Calendar Timeblock + Logout + Security
+
+### Changes Made
+
+#### Calendar Timeblock (New Tab)
+| File | Change |
+|------|--------|
+| `src/notion.js` | Added `Scheduled` property parsing, `updateTaskSchedule()`, `calendar_week` query type, `options` param to `queryTasks` |
+| `src/index.js` | Added `GET /api/calendar`, `POST /api/calendar/schedule`, imported `updateTaskSchedule` |
+| `public/index.html` | Added 📅 Calendar tab, `#calendar-view` with grid, modal, unscheduled sidebar |
+| `public/style.css` | Added ~250 lines: CSS Grid calendar (8×32), task blocks, now-line, modal, unscheduled chips |
+| `public/app.js` | Added ~290 lines: `fetchCalendar`, `renderCalendar`, `openScheduleModal`, `saveSchedule`, week nav, now-line timer |
+| Notion DB | Added `Scheduled` date property (with time) via API |
+
+#### Logout + Security
+| File | Change |
+|------|--------|
+| `src/auth.js` | Added `handleLogout()` — clear cookie with Max-Age=0 |
+| `src/index.js` | Added `POST /api/logout` route |
+| `public/index.html` | Added 🚪 logout button, `autocomplete="off"`, `readonly` trick, `data-1p-ignore`, `data-lpignore` |
+| `public/app.js` | Added `handleLogout()` — clear cookie + localStorage, stop timers, return to login |
+
+#### Bug Fixes
+| Issue | Fix |
+|-------|-----|
+| Loading spinner always visible | `.board-loading[hidden] { display: none }` |
+| Notion API 400 on nested `and` in `or` | Simplified `calendar_week` to flat filter |
+
+### Technical Decisions
+
+#### D1: Calendar Query Strategy
+- **Decision:** Fetch ALL active tasks, filter client-side
+- **Reason:** Notion API doesn't support nested compound filters (`and` inside `or`). Simpler to fetch all ~20 active tasks and filter in JS.
+- **Impact:** Slightly more data transferred, but simpler and more reliable.
+
+#### D2: iPad Schedule UX
+- **Decision:** Tap → modal (date/time picker) instead of drag-drop
+- **Reason:** Touch drag is unreliable on iPad Safari. Modal with native date/time inputs is consistent.
+- **Impact:** Desktop users also use modal (could add drag-drop later for desktop).
+
+### Test Results (Production)
+- **API Integration:** 35/35 ✅
+- **UI Structure:** 69/70 (1 false positive: calendar task uses intentional `border-left`)
+- **Calendar + Logout:** 41/41 ✅
+- **Total:** 145/146
+
+---
+
 ## 2026-06-07 — v5.0 Major Rewrite (Phỏng vấn User → 8 Phases)
+
 
 ### Bối cảnh
 User bỏ bê project 1 tuần, nhận thấy không hiệu quả. Phỏng vấn ADHD workflow → phát hiện: gamification gây nhiễu, thiếu kanban, instant commands bị false positives, prompt quá dài, cần iPad dashboard.

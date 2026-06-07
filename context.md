@@ -1,7 +1,7 @@
 # 🚀 Stratt — Project Context
 
 > File này chứa đủ context để developer mới (hoặc AI agent) tiếp tục phát triển mà không cần hỏi lại.
-> Cập nhật lần cuối: 2026-06-07 (v5.0)
+> Cập nhật lần cuối: 2026-06-07 (v5.1)
 
 ---
 
@@ -14,6 +14,7 @@
 **Key UX:**
 - AI nhớ ngữ cảnh hội thoại (5 tin nhắn, KV memory)
 - **Kanban Board** tab: 4 cột (To Do, In Progress, Pending, Done Today), filter + quick add
+- **Calendar Timeblock** tab: Week view 7:00–23:00, 30-min blocks, tap-to-schedule
 - Instant commands (~60% messages skip AI, <1s response)
 - Smart cron reminders (Telegram), skip khi không cần
 - Materials storage (links, guides, notes)
@@ -103,6 +104,7 @@ Database **"Today"** (`1a65fcb4-61d1-814c-9f08-e65b9e28af64`).
 | `State` | status | Status | To do, In progress, Pending / Wait for approved, Completed |
 | `Deadline` | date | Due date | — |
 | `Do Date` | date | Planned do date | — |
+| `Scheduled` | date | Scheduled datetime | With time (e.g. 2026-06-09T09:00) |
 | `Estimate` | number | Minutes estimate | — |
 | `Block` | select | Time block | ☀️ AM, 🌤️ PM, 🌙 Power Block |
 | `Source` | select | Source | EIT, Side Gig, Self, Personal |
@@ -158,6 +160,8 @@ stratt/  (local dir: warroom/)
 | GET | `/api/tasks` | Cookie | Board: all active + done today + materials |
 | POST | `/api/tasks/create` | Cookie | Quick add task (bypass AI) |
 | POST | `/api/tasks/update` | Cookie | Update task status by page ID |
+| GET | `/api/calendar` | Cookie | Calendar: all active tasks for week |
+| POST | `/api/calendar/schedule` | Cookie | Set/remove scheduled datetime |
 | GET | `/api/health` | No | Health check (v5.0.0) |
 | POST | `/api/telegram` | Chat ID | Telegram webhook + callback_query |
 | POST | `/api/setup-telegram` | Cookie | Set Telegram webhook URL |
@@ -239,4 +243,5 @@ TELEGRAM_CHAT_ID    — Matt's Telegram chat ID
 | 3.6 | 2026-05-18 | Query redesign, regex fallbacks |
 | 4.0 | 2026-05-18 | Engine-first, done-by-number, auto-defer |
 | 4.1 | 2026-05-18 | Disabled regex (false positives), AI-only |
-| **5.0** | **2026-06-07** | **Major rewrite — see audit log** |
+| **5.0** | **2026-06-07** | **Major rewrite — kanban, Phong Thủy, no gamification** |
+| **5.1** | **2026-06-07** | **Calendar timeblock, logout, anti-autofill** |
