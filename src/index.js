@@ -4,7 +4,7 @@ import { isAuthenticated, handleLogin, handleLogout } from './auth.js';
 import { processChat } from './triage.js';
 import { handleTelegramWebhook, setTelegramWebhook } from './telegram.js';
 import { handleScheduled } from './reminders.js';
-import { backfillDoDate, queryTasks, createTask, updateTaskStatusById } from './notion.js';
+import { backfillDoDate, queryTasks, createTask, updateTaskStatusById, updateTaskSchedule } from './notion.js';
 
 // ─── Security: Never leak secrets in any response ───────────
 const SECRET_KEYS = ['MINIMAX_API_KEY', 'NOTION_API_KEY', 'NOTION_TASKS_DB_ID', 'NOTION_DAILY_DB_ID', 'APP_PASSWORD', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'];
@@ -226,6 +226,61 @@ export default {
             );
           }
           const result = await updateTaskStatusById(body.id, body.status, env);
+          return new Response(
+            JSON.stringify({ success: true, task: result }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // GET /api/calendar?week=YYYY-MM-DD — Calendar view tasks
+        if (path === '/api/calendar' && request.method === 'GET') {
+          if (!(await isAuthenticated(request, env))) {
+            return new Response(
+              JSON.stringify({ error: 'Unauthorized' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          const weekParam = url.searchParams.get('week');
+          // Calculate week start (Monday) and end (Sunday)
+          let weekStart;
+          if (weekParam) {
+            weekStart = new Date(weekParam);
+          } else {
+            weekStart = new Date();
+          }
+          // Adjust to Monday
+          const day = weekStart.getDay();
+          const diff = day === 0 ? -6 : 1 - day;
+          weekStart.setDate(weekStart.getDate() + diff);
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekEnd.getDate() + 6);
+
+          const ws = weekStart.toISOString().split('T')[0];
+          const we = weekEnd.toISOString().split('T')[0];
+
+          const tasks = await queryTasks('calendar_week', env, { weekStart: ws, weekEnd: we });
+          return new Response(
+            JSON.stringify({ weekStart: ws, weekEnd: we, tasks }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // POST /api/calendar/schedule — Set scheduled time for a task
+        if (path === '/api/calendar/schedule' && request.method === 'POST') {
+          if (!(await isAuthenticated(request, env))) {
+            return new Response(
+              JSON.stringify({ error: 'Unauthorized' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          const body = await request.json();
+          if (!body.id) {
+            return new Response(
+              JSON.stringify({ error: 'id is required' }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          const result = await updateTaskSchedule(body.id, body.scheduled || null, env);
           return new Response(
             JSON.stringify({ success: true, task: result }),
             { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

@@ -132,9 +132,11 @@ async function fetchWithRetry(url, options, maxRetries = 2) {
 
 /**
  * Query tasks from Notion with filters + pagination
- * @param {string} queryType - "today" | "upcoming" | "overdue" | "all_active" | "weekly_report" | "backlog" | "materials" | "board_all" | "board_done_today"
+ * @param {string} queryType - "today" | "upcoming" | "overdue" | "all_active" | "weekly_report" | "backlog" | "materials" | "board_all" | "board_done_today" | "calendar_week"
+ * @param {object} env
+ * @param {object} options - Extra params (e.g. { weekStart, weekEnd } for calendar_week)
  */
-export async function queryTasks(queryType, env) {
+export async function queryTasks(queryType, env, options = {}) {
   let filter;
   const today = new Date().toISOString().split('T')[0];
   const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
@@ -252,6 +254,15 @@ export async function queryTasks(queryType, env) {
       };
       break;
 
+    case 'calendar_week': {
+      // Calendar: fetch all active (non-completed) tasks
+      // Client side filters by week range — simpler and avoids Notion nested filter issues
+      filter = {
+        property: 'State', status: { does_not_equal: 'Completed' },
+      };
+      break;
+    }
+
     default:
       filter = undefined;
   }
@@ -302,6 +313,23 @@ export async function updateTaskStatusById(pageId, newStatus, env) {
     body: JSON.stringify({
       properties: { 'State': { status: { name: mapped } } },
     }),
+  });
+
+  return parseNotionTask(await response.json());
+}
+
+/**
+ * Update a task's scheduled datetime
+ */
+export async function updateTaskSchedule(pageId, scheduledISO, env) {
+  const props = scheduledISO
+    ? { 'Scheduled': { date: { start: scheduledISO } } }
+    : { 'Scheduled': { date: null } };
+
+  const response = await fetchWithRetry(`${NOTION_BASE}/pages/${pageId}`, {
+    method: 'PATCH',
+    headers: notionHeaders(env.NOTION_API_KEY),
+    body: JSON.stringify({ properties: props }),
   });
 
   return parseNotionTask(await response.json());
@@ -667,6 +695,7 @@ function parseNotionTask(page) {
     estimate: p?.Estimate?.number || 0,
     due_date: p?.Deadline?.date?.start || '',
     do_date: p?.['Do Date']?.date?.start || '',
+    scheduled: p?.Scheduled?.date?.start || '',
     block: p?.Block?.select?.name || '',
     source: p?.Source?.select?.name || '',
     assigned_by: p?.['Assigned By']?.rich_text?.[0]?.text?.content || '',

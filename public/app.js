@@ -13,6 +13,12 @@ let boardData = { active: [], doneToday: [], materials: [] };
 let boardRefreshTimer = null;
 let wakeLockSentinel = null;
 
+// Calendar state
+let calWeekStart = null; // Date object (Monday)
+let calTasks = [];
+let calModalTaskId = null;
+let calNowLineTimer = null;
+
 // ═══ DOM ═══
 const $ = id => document.getElementById(id);
 
@@ -28,6 +34,7 @@ const authSubmit = $('auth-submit');
 const headerTime = $('header-time');
 const tabChat = $('tab-chat');
 const tabBoard = $('tab-board');
+const tabCalendar = $('tab-calendar');
 
 // Chat
 const chatView = $('chat-view');
@@ -61,6 +68,7 @@ function setupEventListeners() {
   // Tabs
   tabChat.addEventListener('click', () => switchTab('chat'));
   tabBoard.addEventListener('click', () => switchTab('board'));
+  tabCalendar.addEventListener('click', () => switchTab('calendar'));
 
   // Chat
   chatForm.addEventListener('submit', handleChatSubmit);
@@ -166,16 +174,25 @@ function switchTab(tab) {
   currentTab = tab;
   tabChat.classList.toggle('active', tab === 'chat');
   tabBoard.classList.toggle('active', tab === 'board');
+  tabCalendar.classList.toggle('active', tab === 'calendar');
   chatView.classList.toggle('active', tab === 'chat');
   boardView.classList.toggle('active', tab === 'board');
+  $('calendar-view').classList.toggle('active', tab === 'calendar');
 
   if (tab === 'board') {
     fetchBoard();
     startBoardRefresh();
   } else {
     stopBoardRefresh();
-    chatInput.focus();
   }
+  if (tab === 'calendar') {
+    if (!calWeekStart) calInitWeek();
+    fetchCalendar();
+    startCalNowLine();
+  } else {
+    stopCalNowLine();
+  }
+  if (tab === 'chat') chatInput.focus();
 }
 
 // ═══ Chat ═══
@@ -461,3 +478,293 @@ async function toggleWakeLock() {
     }
   }
 }
+
+// ═══ CALENDAR ═══
+
+const CAL_START_HOUR = 7;
+const CAL_END_HOUR = 23;
+const CAL_SLOTS = (CAL_END_HOUR - CAL_START_HOUR) * 2; // 32 half-hours
+const DAY_NAMES = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+
+function calInitWeek() {
+  const now = new Date();
+  const day = now.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  calWeekStart = new Date(now);
+  calWeekStart.setDate(now.getDate() + diff);
+  calWeekStart.setHours(0, 0, 0, 0);
+}
+
+function calShiftWeek(delta) {
+  calWeekStart.setDate(calWeekStart.getDate() + delta * 7);
+  fetchCalendar();
+}
+
+function calGoToday() {
+  calInitWeek();
+  fetchCalendar();
+}
+
+async function fetchCalendar() {
+  const loading = $('cal-loading');
+  loading.hidden = false;
+  const ws = calWeekStart.toISOString().split('T')[0];
+  try {
+    const res = await fetch(`${API}/calendar?week=${ws}`);
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    calTasks = data.tasks || [];
+    renderCalendar();
+  } catch (err) {
+    console.error('Calendar fetch error:', err);
+  } finally {
+    loading.hidden = true;
+  }
+}
+
+function renderCalendar() {
+  const grid = $('cal-grid');
+  grid.innerHTML = '';
+  const today = new Date().toISOString().split('T')[0];
+
+  // Update week label
+  const we = new Date(calWeekStart);
+  we.setDate(we.getDate() + 6);
+  const fmt = d => `${d.getDate()}/${d.getMonth() + 1}`;
+  $('cal-week-label').textContent = `${fmt(calWeekStart)} — ${fmt(we)} / ${calWeekStart.getFullYear()}`;
+
+  // Time gutter header (top-left corner)
+  const gutterHeader = document.createElement('div');
+  gutterHeader.className = 'cal-time-gutter-header';
+  grid.appendChild(gutterHeader);
+
+  // Day headers
+  for (let d = 0; d < 7; d++) {
+    const date = new Date(calWeekStart);
+    date.setDate(date.getDate() + d);
+    const dateStr = date.toISOString().split('T')[0];
+    const header = document.createElement('div');
+    header.className = 'cal-day-header' + (dateStr === today ? ' today' : '');
+    header.innerHTML = `<span class="cal-day-name">${DAY_NAMES[date.getDay()]}</span><span class="cal-day-num">${date.getDate()}</span>`;
+    header.style.gridColumn = d + 2;
+    header.style.gridRow = 1;
+    grid.appendChild(header);
+  }
+
+  // Time slots + cells
+  for (let s = 0; s < CAL_SLOTS; s++) {
+    const hour = CAL_START_HOUR + Math.floor(s / 2);
+    const min = (s % 2) * 30;
+    const row = s + 2; // row 1 is header
+
+    // Time gutter label (only on hour marks)
+    if (s % 2 === 0) {
+      const gutter = document.createElement('div');
+      gutter.className = 'cal-time-gutter';
+      gutter.style.gridRow = row;
+      gutter.textContent = `${hour}:00`;
+      grid.appendChild(gutter);
+    } else {
+      // Empty gutter for half-hour
+      const gutter = document.createElement('div');
+      gutter.className = 'cal-time-gutter';
+      gutter.style.gridRow = row;
+      gutter.style.borderRight = '1px solid var(--border-1)';
+      grid.appendChild(gutter);
+    }
+
+    // Day cells
+    for (let d = 0; d < 7; d++) {
+      const cell = document.createElement('div');
+      cell.className = 'cal-cell' + (s % 2 === 0 ? ' hour-start' : '');
+      cell.style.gridColumn = d + 2;
+      cell.style.gridRow = row;
+      // Click to schedule (empty slot)
+      const cellDate = new Date(calWeekStart);
+      cellDate.setDate(cellDate.getDate() + d);
+      const cellDateStr = cellDate.toISOString().split('T')[0];
+      const cellTime = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+      cell.addEventListener('click', () => {
+        // If there's a dragged task, could schedule it here
+        // For now just open modal if we have a pending task
+      });
+      cell.dataset.date = cellDateStr;
+      cell.dataset.time = cellTime;
+      grid.appendChild(cell);
+    }
+  }
+
+  // Place scheduled tasks
+  const scheduled = calTasks.filter(t => t.scheduled);
+  const unscheduled = calTasks.filter(t => !t.scheduled);
+
+  scheduled.forEach(task => {
+    const dt = new Date(task.scheduled);
+    const dateStr = task.scheduled.split('T')[0];
+    const hours = dt.getHours ? dt.getHours() : parseInt(task.scheduled.split('T')[1]);
+    const mins = dt.getMinutes ? dt.getMinutes() : parseInt(task.scheduled.split('T')[1]?.split(':')[1] || '0');
+
+    // Find which day column
+    const dayDiff = Math.floor((new Date(dateStr) - calWeekStart) / 86400000);
+    if (dayDiff < 0 || dayDiff > 6) return;
+
+    const slotIndex = (hours - CAL_START_HOUR) * 2 + Math.floor(mins / 30);
+    if (slotIndex < 0 || slotIndex >= CAL_SLOTS) return;
+
+    const duration = task.estimate || 30;
+    const slotSpan = Math.max(1, Math.ceil(duration / 30));
+    const rowStart = slotIndex + 2;
+
+    // Find the parent cell to position relative to
+    const col = dayDiff + 2;
+    const block = document.createElement('div');
+    block.className = 'cal-task';
+    block.dataset.urgency = task.urgency || '';
+    block.dataset.taskId = task.id;
+    block.innerHTML = `<div class="cal-task-title">${task.title}</div><div class="cal-task-project">${task.project} · ${duration}m</div>`;
+    block.style.gridColumn = col;
+    block.style.gridRow = `${rowStart} / span ${slotSpan}`;
+    block.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openScheduleModal(task);
+    });
+    grid.appendChild(block);
+  });
+
+  // Unscheduled list
+  const unschedList = $('cal-unscheduled-list');
+  $('cal-unscheduled-count').textContent = unscheduled.length;
+  unschedList.innerHTML = '';
+  unscheduled.forEach(task => {
+    const urgIcon = task.urgency?.substring(0, 2) || '⚪';
+    const chip = document.createElement('div');
+    chip.className = 'cal-unsched-chip';
+    chip.innerHTML = `<span class="chip-urgency">${urgIcon}</span><span>${task.title}</span>${task.estimate ? `<span class="chip-est">${task.estimate}m</span>` : ''}`;
+    chip.addEventListener('click', () => openScheduleModal(task));
+    unschedList.appendChild(chip);
+  });
+
+  // Current time line
+  updateCalNowLine();
+}
+
+function updateCalNowLine() {
+  // Remove existing
+  document.querySelectorAll('.cal-now-line').forEach(el => el.remove());
+
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+  const h = now.getHours();
+  const m = now.getMinutes();
+  if (h < CAL_START_HOUR || h >= CAL_END_HOUR) return;
+
+  const dayDiff = Math.floor((new Date(today) - calWeekStart) / 86400000);
+  if (dayDiff < 0 || dayDiff > 6) return;
+
+  const totalMins = (h - CAL_START_HOUR) * 60 + m;
+  const slotFraction = totalMins / 30;
+  const row = Math.floor(slotFraction) + 2;
+  const fractional = slotFraction % 1;
+
+  // Find the cell at that position
+  const col = dayDiff + 2;
+  const cells = document.querySelectorAll(`.cal-cell[data-date="${today}"]`);
+  const targetCell = cells[Math.floor(slotFraction)];
+  if (!targetCell) return;
+
+  const line = document.createElement('div');
+  line.className = 'cal-now-line';
+  line.style.top = (fractional * 100) + '%';
+  targetCell.appendChild(line);
+}
+
+function startCalNowLine() {
+  stopCalNowLine();
+  calNowLineTimer = setInterval(updateCalNowLine, 60000);
+}
+function stopCalNowLine() {
+  if (calNowLineTimer) { clearInterval(calNowLineTimer); calNowLineTimer = null; }
+}
+
+// ─── Schedule Modal ───
+function openScheduleModal(task) {
+  calModalTaskId = task.id;
+  $('cal-modal-title').textContent = task.title;
+  const overlay = $('cal-modal-overlay');
+
+  if (task.scheduled) {
+    const dt = new Date(task.scheduled);
+    $('cal-modal-date').value = task.scheduled.split('T')[0];
+    const h = String(dt.getHours()).padStart(2, '0');
+    const m = String(dt.getMinutes()).padStart(2, '0');
+    $('cal-modal-time').value = `${h}:${m}`;
+  } else {
+    // Default to today + next half-hour
+    const now = new Date();
+    $('cal-modal-date').value = now.toISOString().split('T')[0];
+    const nextH = now.getMinutes() < 30 ? now.getHours() : now.getHours() + 1;
+    const nextM = now.getMinutes() < 30 ? '30' : '00';
+    $('cal-modal-time').value = `${String(nextH).padStart(2, '0')}:${nextM}`;
+  }
+  $('cal-modal-duration').value = task.estimate || 30;
+  $('cal-modal-remove').style.display = task.scheduled ? '' : 'none';
+
+  overlay.hidden = false;
+}
+
+function closeScheduleModal() {
+  $('cal-modal-overlay').hidden = true;
+  calModalTaskId = null;
+}
+
+async function saveSchedule() {
+  if (!calModalTaskId) return;
+  const date = $('cal-modal-date').value;
+  const time = $('cal-modal-time').value;
+  if (!date || !time) return;
+
+  const scheduledISO = `${date}T${time}:00`;
+  $('cal-modal-save').disabled = true;
+  try {
+    await fetch(`${API}/calendar/schedule`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: calModalTaskId, scheduled: scheduledISO }),
+    });
+    closeScheduleModal();
+    fetchCalendar();
+  } catch (err) {
+    console.error('Schedule error:', err);
+  } finally {
+    $('cal-modal-save').disabled = false;
+  }
+}
+
+async function removeSchedule() {
+  if (!calModalTaskId) return;
+  try {
+    await fetch(`${API}/calendar/schedule`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: calModalTaskId, scheduled: null }),
+    });
+    closeScheduleModal();
+    fetchCalendar();
+  } catch (err) {
+    console.error('Remove schedule error:', err);
+  }
+}
+
+// Calendar event listeners (set up in DOMContentLoaded)
+document.addEventListener('DOMContentLoaded', () => {
+  $('cal-prev')?.addEventListener('click', () => calShiftWeek(-1));
+  $('cal-next')?.addEventListener('click', () => calShiftWeek(1));
+  $('cal-today')?.addEventListener('click', calGoToday);
+  $('cal-refresh')?.addEventListener('click', () => fetchCalendar());
+  $('cal-modal-close')?.addEventListener('click', closeScheduleModal);
+  $('cal-modal-overlay')?.addEventListener('click', (e) => {
+    if (e.target === $('cal-modal-overlay')) closeScheduleModal();
+  });
+  $('cal-modal-save')?.addEventListener('click', saveSchedule);
+  $('cal-modal-remove')?.addEventListener('click', removeSchedule);
+});

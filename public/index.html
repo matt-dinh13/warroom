@@ -60,6 +60,7 @@
       <div class="header-tabs">
         <button class="tab-btn active" data-tab="chat" id="tab-chat">💬 Chat</button>
         <button class="tab-btn" data-tab="board" id="tab-board">📋 Board</button>
+        <button class="tab-btn" data-tab="calendar" id="tab-calendar">📅 Calendar</button>
       </div>
       <div class="header-right">
         <span class="header-time" id="header-time"></span>
@@ -195,6 +196,66 @@
       <div class="board-loading" id="board-loading" hidden>
         <div class="spinner"></div>
         <span>Loading tasks...</span>
+      </div>
+    </div>
+
+    <!-- ═══ CALENDAR TAB ═══ -->
+    <div id="calendar-view" class="tab-view">
+      <!-- Calendar Toolbar -->
+      <div class="cal-toolbar">
+        <div class="cal-nav">
+          <button class="cal-nav-btn" id="cal-prev" title="Previous week">◀</button>
+          <button class="cal-nav-btn cal-today" id="cal-today">Today</button>
+          <button class="cal-nav-btn" id="cal-next" title="Next week">▶</button>
+        </div>
+        <span class="cal-week-label" id="cal-week-label">Week</span>
+        <div class="cal-actions">
+          <button class="cal-nav-btn" id="cal-refresh" title="Refresh">🔄</button>
+        </div>
+      </div>
+
+      <!-- Time Grid -->
+      <div class="cal-grid-wrapper">
+        <div class="cal-grid" id="cal-grid">
+          <!-- Rendered by JS: time labels + 7 day columns -->
+        </div>
+      </div>
+
+      <!-- Unscheduled Tasks Sidebar -->
+      <div class="cal-unscheduled">
+        <div class="cal-unscheduled-header">
+          <span>📋 Unscheduled</span>
+          <span class="cal-unscheduled-count" id="cal-unscheduled-count">0</span>
+        </div>
+        <div class="cal-unscheduled-list" id="cal-unscheduled-list"></div>
+      </div>
+
+      <!-- Schedule Modal (tap to schedule on iPad) -->
+      <div class="cal-modal-overlay" id="cal-modal-overlay" hidden>
+        <div class="cal-modal">
+          <div class="cal-modal-header">
+            <span id="cal-modal-title">Schedule Task</span>
+            <button class="cal-modal-close" id="cal-modal-close">✕</button>
+          </div>
+          <div class="cal-modal-body">
+            <label>Date</label>
+            <input type="date" id="cal-modal-date" class="cal-modal-input">
+            <label>Time</label>
+            <input type="time" id="cal-modal-time" class="cal-modal-input" step="1800">
+            <label>Duration (minutes)</label>
+            <input type="number" id="cal-modal-duration" class="cal-modal-input" value="30" min="15" step="15">
+          </div>
+          <div class="cal-modal-footer">
+            <button class="cal-modal-btn cal-modal-remove" id="cal-modal-remove">Remove Schedule</button>
+            <button class="cal-modal-btn cal-modal-save" id="cal-modal-save">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Calendar Loading -->
+      <div class="board-loading" id="cal-loading" hidden>
+        <div class="spinner"></div>
+        <span>Loading calendar...</span>
       </div>
     </div>
   </div>
