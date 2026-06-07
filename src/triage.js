@@ -229,16 +229,24 @@ export async function processChat(userMessage, env, chatId = 'web') {
   // ═══ Intent auto-correction ═══════
   // MiniMax often returns intent=CLARIFY even when it performed an action
   let finalIntent = aiResult.intent || 'CLARIFY';
-  if (finalIntent === 'CLARIFY' && action && notionResult) {
-    const intentMap = {
-      'create': 'CAPTURE',
-      'create_batch': 'CAPTURE_BATCH',
-      'update': 'UPDATE',
-      'edit': 'EDIT',
-      'delete': 'DELETE',
-      'query': 'LIST_TASKS',
-    };
-    finalIntent = intentMap[action.type] || finalIntent;
+  if (finalIntent === 'CLARIFY' && notionResult) {
+    if (action) {
+      // AI returned notion_action — map type to intent
+      const intentMap = {
+        'create': 'CAPTURE',
+        'create_batch': 'CAPTURE_BATCH',
+        'update': 'UPDATE',
+        'edit': 'EDIT',
+        'delete': 'DELETE',
+        'query': 'LIST_TASKS',
+      };
+      finalIntent = intentMap[action.type] || finalIntent;
+    } else if (/✅ Đã tạo|📌/.test(responseText)) {
+      // Fallback parser created a task
+      finalIntent = 'CAPTURE';
+    } else if (/✅ Done|Cuối cùng|tưởng quên/.test(responseText)) {
+      finalIntent = 'UPDATE';
+    }
   }
 
   return buildResult(finalIntent, responseText, Array.isArray(notionResult) ? notionResult.length : undefined);
