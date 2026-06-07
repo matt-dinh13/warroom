@@ -8,6 +8,7 @@
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
+    "puppeteer-core": "^25.1.0",
     "wrangler": "^4.68.0"
   }
 }

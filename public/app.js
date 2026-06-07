@@ -515,23 +515,27 @@ function calGoToday() {
 
 async function fetchCalendar() {
   const loading = $('cal-loading');
-  loading.hidden = false;
+  if (loading) loading.hidden = false;
+  if (!calWeekStart) calInitWeek();
   const ws = localDateStr(calWeekStart);
   try {
     const res = await fetch(`${API}/calendar?week=${ws}`);
-    if (!res.ok) throw new Error(res.status);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     calTasks = data.tasks || [];
     renderCalendar();
   } catch (err) {
     console.error('Calendar fetch error:', err);
+    // Still render empty grid so UI isn't blank
+    renderCalendar();
   } finally {
-    loading.hidden = true;
+    if (loading) loading.hidden = true;
   }
 }
 
 function renderCalendar() {
   const grid = $('cal-grid');
+  if (!grid || !calWeekStart) return;
   grid.innerHTML = '';
   const today = localDateStr(new Date());
 
