@@ -30,7 +30,8 @@ export async function handleTelegramWebhook(update, env, processChat) {
       '• /load — Check load\n' +
       '• /report — Weekly report\n' +
       '• /done [task] — Đánh dấu xong\n' +
-      '• /edit [task] — Sửa task\n\n' +
+      '• /edit [task] — Sửa task\n' +
+      '• stats — Xem analytics\n\n' +
       '💡 Gửi nhiều task 1 lúc để brain dump!',
       'HTML', buildMainKeyboard()
     );

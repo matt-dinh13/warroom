@@ -9,6 +9,7 @@ import { SYSTEM_PROMPT, PROJECT_SOURCE_MAP } from './prompts.js';
 import { matchInstantCommand, executeInstantCommand } from './commands.js';
 import { getVNContext, buildCaptureConfirmation, buildCompletionResponse } from './responses.js';
 import { tryParseCaptureFromAIResponse, detectFallbackIntent, extractUpdateTarget } from './parsers.js';
+import { recordDelta } from './analytics.js';
 
 // ─── Conversation Memory ─────────────────────────────
 const MEMORY_TTL = 86400; // 24h
@@ -171,12 +172,22 @@ function buildResult(intent, text, taskCount) {
 // ─── Main Entry ───────────────────────────────────────
 export async function processChat(userMessage, env, chatId = 'web') {
   const msg = userMessage.trim();
+  const source = chatId === 'web' ? 'web' : 'telegram';
+  const t0 = Date.now();
 
   // ═══ PHASE 1: Instant Commands (regex, <1s) ═══════
   const cmd = matchInstantCommand(msg);
   if (cmd) {
     const result = await executeInstantCommand(cmd, env, chatId, getLastPlan, saveLastPlan);
-    if (result) return result;
+    if (result) {
+      // Analytics: instant command (no AI)
+      const d = { interactions: 1, instant_commands: 1, sources: { [source]: 1 }, intents: { [result.intent]: 1 } };
+      if (cmd.type === 'done_num' || cmd.type === 'done_name') {
+        d.completions = { [cmd.type]: 1 };
+      }
+      await recordDelta(env, d);
+      return result;
+    }
   }
 
   // ═══ PHASE 2: AI-Powered ═══════
@@ -239,8 +250,18 @@ export async function processChat(userMessage, env, chatId = 'web') {
     { role: 'user', content: enrichedMessage },
   ];
 
+  const aiStart = Date.now();
   const aiResult = await callMiniMax(null, null, env.MINIMAX_API_KEY, messages);
+  const aiLatency = Date.now() - aiStart;
   const updatedHistory = [...history, { role: 'user', content: enrichedMessage }];
+
+  // Analytics delta accumulator (flushed before each return below)
+  const analytics = {
+    interactions: 1,
+    sources: { [source]: 1 },
+    ai_calls: 1,
+    ai_latency_ms: aiLatency,
+  };
 
   let notionResult = null;
   const action = aiResult.notion_action;
@@ -384,6 +405,7 @@ export async function processChat(userMessage, env, chatId = 'web') {
       }
     } catch (err) {
       console.error('Notion error:', err);
+      analytics.errors = 1;
       responseText += `\n\n⚠️ Lỗi: ${err.message}`;
     }
   }
@@ -488,6 +510,33 @@ export async function processChat(userMessage, env, chatId = 'web') {
     } else if (/✅ Done|Cuối cùng|tưởng quên/.test(responseText)) {
       finalIntent = 'UPDATE';
     }
+  }
+
+  // ═══ Analytics finalization ═══════
+  try {
+    analytics.intents = { [finalIntent]: 1 };
+
+    // Detect AI failure: AI returned no usable action but a fallback had to handle it
+    if (!action && notionResult) {
+      analytics.ai_failures = 1;
+    }
+
+    // Capture tracking
+    if (finalIntent === 'CAPTURE' || finalIntent === 'CAPTURE_BATCH' || finalIntent === 'CAPTURE_SPLIT') {
+      const captureSource = action ? `chat_${source}` : 'direct_parse';
+      const count = (finalIntent === 'CAPTURE_BATCH' && typeof notionResult === 'number') ? notionResult : 1;
+      analytics.captures = { [captureSource]: count };
+    }
+    // Completion tracking (natural language done via AI/fallback)
+    if (finalIntent === 'UPDATE' && notionResult) {
+      analytics.completions = { natural: 1 };
+    }
+    if (finalIntent === 'EDIT' && notionResult) analytics.edits = 1;
+    if (finalIntent === 'DELETE' && notionResult) analytics.deletes = 1;
+
+    await recordDelta(env, analytics);
+  } catch (err) {
+    console.error('Analytics finalize error:', err);
   }
 
   return buildResult(finalIntent, responseText, Array.isArray(notionResult) ? notionResult.length : undefined);

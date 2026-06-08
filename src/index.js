@@ -5,6 +5,7 @@ import { processChat, tryDirectParse } from './triage.js';
 import { handleTelegramWebhook, setTelegramWebhook } from './telegram.js';
 import { handleScheduled } from './reminders.js';
 import { backfillDoDate, queryTasks, createTask, updateTaskStatusById, updateTaskSchedule } from './notion.js';
+import { recordDelta, getSummary, buildStatsReport } from './analytics.js';
 
 // ─── Security: Never leak secrets in any response ───────────
 const SECRET_KEYS = ['MINIMAX_API_KEY', 'NOTION_API_KEY', 'NOTION_TASKS_DB_ID', 'NOTION_DAILY_DB_ID', 'APP_PASSWORD', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'];
@@ -197,7 +198,7 @@ export default {
             JSON.stringify({
               status: 'ok',
               timestamp: new Date().toISOString(),
-              version: '5.4.2',
+              version: '5.5.0',
               telegram: !!env.TELEGRAM_BOT_TOKEN,
               cron: true,
             }),
@@ -252,6 +253,7 @@ export default {
           if (body.deadline) taskData.due_date = body.deadline;
           if (body.resource) taskData.resource = body.resource;
           const result = await createTask(taskData, env);
+          await recordDelta(env, { captures: { board: 1 } });
           return new Response(
             JSON.stringify({ success: true, task: result }),
             { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -274,6 +276,9 @@ export default {
             );
           }
           const result = await updateTaskStatusById(body.id, body.status, env);
+          if (body.status === 'Completed') {
+            await recordDelta(env, { completions: { board: 1 } });
+          }
           return new Response(
             JSON.stringify({ success: true, task: result }),
             { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -330,6 +335,22 @@ export default {
           const result = await updateTaskSchedule(body.id, body.scheduled || null, env);
           return new Response(
             JSON.stringify({ success: true, task: result }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // GET /api/analytics?days=7 — Usage analytics (requires auth)
+        if (path === '/api/analytics' && request.method === 'GET') {
+          if (!(await isAuthenticated(request, env))) {
+            return new Response(
+              JSON.stringify({ error: 'Unauthorized' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          const days = Math.min(parseInt(url.searchParams.get('days') || '7'), 90);
+          const summary = await getSummary(env, days);
+          return new Response(
+            JSON.stringify(summary || { error: 'No data' }),
             { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }

@@ -2,6 +2,7 @@
 // Smart: shorter messages, skip when no tasks, no gamification
 import { queryTasks } from './notion.js';
 import { sendTelegramMessage } from './telegram.js';
+import { recordDelta } from './analytics.js';
 
 /**
  * Handle scheduled (cron) event
@@ -142,6 +143,8 @@ async function sendAutoDeferSummary(env) {
   if (!completed.length && !deferred) msg += `\n💤 Nghỉ ngơi. Mai mới.`;
   else if (deferred > 0) msg += `\n💤 Rest well.`;
   else msg += `\n🎉 Great day!`;
+
+  if (deferred > 0) await recordDelta(env, { defers: deferred });
 
   await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, msg, 'HTML', buildKeyboard());
 }

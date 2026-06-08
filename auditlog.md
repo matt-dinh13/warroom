@@ -4,6 +4,52 @@
 
 ---
 
+## 2026-06-08 — v5.5 Analytics (Sprint 1: Đo lường)
+
+### Scope
+Thêm usage analytics để trả lời câu hỏi PO: feature nào thực sự được dùng, AI có đáng tin không, Matt có hoàn thành task hay chỉ tạo.
+
+### Design
+- **Fire-and-forget:** `recordDelta` không bao giờ throw, không block main flow
+- **Daily buckets:** KV key `analytics:YYYY-MM-DD` (VN date), TTL 90 ngày
+- **1 KV write/request:** accumulate delta → flush 1 lần ở cuối processChat
+- **3 nhóm metric:** Usage (captures/completions/intents), Health (ai_calls/failures/latency/instant), ADHD behavior (completion ratio, defers)
+
+### Changes Made
+
+| File | Change |
+|------|--------|
+| `src/analytics.js` | NEW — recordDelta, getSummary, buildStatsReport, daily buckets + aggregation |
+| `src/triage.js` | Track: interactions, ai_calls, ai_latency, ai_failures (fallback triggered), captures by source, completions, intents, errors |
+| `src/commands.js` | "stats" command (Phase 1) + track instant_commands, done completions |
+| `src/index.js` | GET /api/analytics?days=N endpoint. Board create/complete tracking |
+| `src/reminders.js` | Track auto-defers |
+| `src/telegram.js` | /start mentions "stats" |
+
+### Metrics Tracked
+| Metric | Câu hỏi PO |
+|--------|-----------|
+| captures by source (chat_web/chat_telegram/board/direct_parse) | User tạo task qua đâu? |
+| completions by method (done_num/done_name/natural/board) | "done N" có được dùng? |
+| ai_failure_rate | MiniMax trả JSON sai bao nhiêu %? |
+| instant_ratio | Engine-first né được bao nhiêu AI call? |
+| completion_ratio | Hoàn thành vs tạo — đang làm hay chỉ capture? |
+| defers | Bao nhiêu task bị auto-defer (loop tội lỗi)? |
+
+### Verification
+| Test | Result |
+|------|--------|
+| plan → records instant_command | ✅ |
+| capture → records ai_call + capture | ✅ |
+| "stats" command | ✅ Full report |
+| GET /api/analytics?days=7 | ✅ JSON with derived metrics |
+| AI failure detection | ✅ Caught fallback-handled captures (100% on test = MiniMax not returning action) |
+
+### Insight ngay từ test
+AI fail rate 100% trên 1 capture mẫu → xác nhận giả thuyết: MiniMax-M2.7 thường trả CAPTURE intent NHƯNG thiếu notion_action, fallback phải gánh. Đây là bằng chứng định lượng đầu tiên cho vấn đề "phụ thuộc AI trả JSON".
+
+---
+
 ## 2026-06-08 — v5.4.2 Audit Hardening
 
 ### Scope

@@ -2,6 +2,7 @@
 // Only exact command words match. Natural language goes to AI.
 
 import { queryTasks, updateTaskStatus } from './notion.js';
+import { getSummary, buildStatsReport } from './analytics.js';
 import {
   buildTriageResponse, buildOverdueResponse, buildLoadCheckResponse,
   buildListResponse, buildReportResponse, buildBacklogResponse,
@@ -17,6 +18,7 @@ const SAFE_COMMANDS = [
   { type: 'report',   regex: /^(?:report|báo cáo|summary|tuần)$/i },
   { type: 'backlog',  regex: /^(?:backlog|ý tưởng|có gì làm|có gì làm không)$/i },
   { type: 'materials',regex: /^(?:materials?|tài liệu|link|guides?)$/i },
+  { type: 'stats',    regex: /^(?:stats|thống kê|analytics|số liệu)$/i },
   { type: 'done_num', regex: /^(?:done|xong)\s+(\d+)$/i },
   // done_name: max ~6 words to avoid matching full sentences ("xong việc rồi nghỉ thôi")
   { type: 'done_name',regex: /^(?:done|xong)\s+(\S+(?:\s+\S+){0,5})$/i },
@@ -74,6 +76,10 @@ export async function executeInstantCommand(cmd, env, chatId, getLastPlan, saveL
     case 'materials': {
       const tasks = await queryTasks('materials', env);
       return buildResult('MATERIALS', buildMaterialsResponse(tasks), tasks.length);
+    }
+    case 'stats': {
+      const summary = await getSummary(env, 7);
+      return buildResult('STATS', buildStatsReport(summary));
     }
     case 'done_num': {
       const idx = parseInt(cmd.match[1]) - 1;
