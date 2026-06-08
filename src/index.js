@@ -145,11 +145,17 @@ export default {
               const directTask = tryDirectParse(message);
               if (directTask) {
                 try {
-                  await createTask(directTask, env);
                   const { buildCaptureConfirmation } = await import('./responses.js');
+                  const tasks = Array.isArray(directTask) ? directTask : [directTask];
+                  for (const t of tasks) {
+                    await createTask(t, env);
+                  }
+                  const confirmTexts = tasks.map(t => buildCaptureConfirmation(t));
                   result = {
                     intent: 'CAPTURE',
-                    response_text: buildCaptureConfirmation(directTask),
+                    response_text: tasks.length > 1
+                      ? `✅ Đã tạo ${tasks.length} tasks:\n\n${confirmTexts.join('\n---\n')}`
+                      : confirmTexts[0],
                     needs_confirmation: false,
                   };
                 } catch (createErr) {

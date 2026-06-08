@@ -16,66 +16,93 @@ const MAX_MEMORY = 5;
 
 // ─── Direct Task Parser (fallback when AI fails) ─────────
 // Parses "tạo task..." messages directly without AI
+// Returns: single task object OR array of tasks (for multi-day)
 export function tryDirectParse(msg) {
   const lower = msg.toLowerCase();
   if (!/tạo|thêm|add|create/.test(lower)) return null;
 
   const VALID_PROJECTS = ['GMA', 'HOSEL', 'SALES', 'EMPULSE', 'KV', 'EDU', 'TEACH', 'LEARN', 'PERSONAL', 'MATERIALS'];
-  const task = {};
+  const now = new Date(Date.now() + 7 * 3600000); // VN time
+  const vnDate = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
 
-  // Title: after "tên" or "task" keyword
+  // ── Title: after "tên" or "task" keyword
+  let title = null;
   const titleMatch = msg.match(/(?:tên|task)\s+(.+?)(?:\n|,|$)/i);
   if (titleMatch) {
-    task.title = titleMatch[1].trim();
+    title = titleMatch[1].trim();
   } else {
-    // Fallback: first line after "tạo task"
     const firstLine = msg.split('\n')[0].replace(/^.*?(?:tạo|thêm|add|create)\s*(?:task)?\s*/i, '').trim();
-    if (firstLine) task.title = firstLine;
+    if (firstLine) title = firstLine;
   }
-  if (!task.title) return null;
+  if (!title) return null;
 
-  // Project
+  // ── Project
+  let project = null;
   const projMatch = msg.match(/(?:dự án|project|DA)\s+(\S+)/i);
   if (projMatch) {
     const upper = projMatch[1].toUpperCase();
-    task.project = VALID_PROJECTS.includes(upper) ? upper : projMatch[1];
+    project = VALID_PROJECTS.includes(upper) ? upper : projMatch[1];
   }
 
-  // Estimate
+  // ── Estimate
+  let estimate = null;
   const estMatch = msg.match(/(\d+)\s*(?:phút|min(?:ute)?s?|p(?!m\b))/i);
-  if (estMatch) task.estimate = parseInt(estMatch[1]);
+  if (estMatch) estimate = parseInt(estMatch[1]);
 
-  // Time (2:30pm, 10am, 14:00...)
-  const timeMatch = msg.match(/(\d{1,2})\s*[:\s]\s*(\d{2})\s*(?:am|pm|sáng|chiều|tối)?/i)
+  // ── Time (2:30pm, 10am, 14:00...)
+  let hour = null, min = 0;
+  const timeMatch = msg.match(/(\d{1,2})\s*[:]\s*(\d{2})\s*(?:am|pm|sáng|chiều|tối)?/i)
     || msg.match(/(\d{1,2})\s*(?:am|pm|sáng|chiều|tối)/i);
   if (timeMatch) {
-    let hour = parseInt(timeMatch[1]);
-    const min = parseInt(timeMatch[2] || '0') || 0;
+    hour = parseInt(timeMatch[1]);
+    min = parseInt(timeMatch[2] || '0') || 0;
     if (/pm|chiều|tối/i.test(msg) && hour < 12) hour += 12;
     if (/am|sáng/i.test(msg) && hour === 12) hour = 0;
+  }
 
-    const now = new Date(Date.now() + 7 * 3600000);
-    const dateStr = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
-    task.scheduled_time = `${dateStr}T${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+  // ── Weekday parsing (thứ 2 = Monday ... thứ 7 = Saturday, chủ nhật = Sunday)
+  const DAY_MAP = { '2': 1, '3': 2, '4': 3, '5': 4, '6': 5, '7': 6 };
+  const weekdayMatches = [...lower.matchAll(/thứ\s*(\d)/g)].map(m => DAY_MAP[m[1]]).filter(d => d !== undefined);
+  if (/chủ\s*nhật/i.test(lower)) weekdayMatches.push(0);
+
+  // Calculate next occurrence of each weekday
+  function nextWeekday(targetDay) {
+    const d = new Date(now);
+    const currentDay = d.getUTCDay();
+    let diff = targetDay - currentDay;
+    if (diff <= 0) diff += 7; // always next occurrence
+    d.setUTCDate(d.getUTCDate() + diff);
+    return d;
+  }
+
+  // ── Build task(s)
+  function buildTask(dateObj) {
+    const dateStr = vnDate(dateObj);
+    const task = {
+      title,
+      urgency: '🟡 Important',
+      energy: '🔋 Med',
+    };
+    if (project) {
+      task.project = project;
+      task.source = PROJECT_SOURCE_MAP[project] || 'EIT';
+    }
+    if (estimate) task.estimate = estimate;
     task.due_date = dateStr;
+    if (hour !== null) {
+      task.scheduled_time = `${dateStr}T${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+    }
+    return task;
   }
 
-  // Default due_date
-  if (!task.due_date) {
-    const now = new Date(Date.now() + 7 * 3600000);
-    task.due_date = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
+  if (weekdayMatches.length > 0) {
+    // Multi-day: return array of tasks
+    const tasks = weekdayMatches.map(day => buildTask(nextWeekday(day)));
+    return tasks.length === 1 ? tasks[0] : tasks;
   }
 
-  // Auto-map source
-  if (task.project) {
-    task.source = PROJECT_SOURCE_MAP[task.project] || 'EIT';
-  }
-
-  // Default urgency/energy
-  task.urgency = task.urgency || '🟡 Important';
-  task.energy = task.energy || '🔋 Med';
-
-  return task;
+  // No weekday specified → use today
+  return buildTask(now);
 }
 
 // ─── Scheduled Time Parser ─────────────────────────────
@@ -342,6 +369,28 @@ export async function processChat(userMessage, env, chatId = 'web') {
           notionResult = await createTask(fallbackTask, env);
           responseText = buildCaptureConfirmation(fallbackTask);
         } catch {}
+      }
+    }
+  }
+
+  // ═══ PHASE 3.5: CAPTURE_BATCH fallback (AI returned intent but didn't create) ═══
+  if (!notionResult && /CAPTURE|BATCH/i.test(aiResult.intent || '')) {
+    const directResult = tryDirectParse(msg);
+    if (directResult) {
+      try {
+        const tasks = Array.isArray(directResult) ? directResult : [directResult];
+        for (const t of tasks) {
+          await createTask(t, env);
+        }
+        notionResult = true;
+        if (tasks.length > 1) {
+          const confirmTexts = tasks.map(t => buildCaptureConfirmation(t));
+          responseText = `✅ Đã tạo ${tasks.length} tasks:\n\n${confirmTexts.join('\n---\n')}`;
+        } else {
+          responseText = buildCaptureConfirmation(tasks[0]);
+        }
+      } catch (err) {
+        console.error('CAPTURE_BATCH fallback error:', err);
       }
     }
   }
