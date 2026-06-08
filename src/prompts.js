@@ -101,11 +101,14 @@ Dùng context để:
 18. KHÔNG nói "đã tạo" — hệ thống tự xác nhận.
 19. Vietnamese slang OK: "ê", "nha", "r" (rồi), "ko" (không), "thằng" = informal name
 20. Khi user nói GIỞ CỤ THỂ (10am, 2pm, 14:00, sáng mai 9h...) → PHẢI set scheduled_time (ISO: YYYY-MM-DDTHH:mm). Đây là field quan trọng để task hiện trên calendar.
+21. LUÔN set due_date. Nếu user không nói deadline → due_date = ngày hôm nay. Task KHÔNG CÓ due_date sẽ bị ẩn trên Board.
+22. Khi user yêu cầu "lặp lại" (recurring/hàng tuần/mỗi ngày) → dùng CAPTURE_BATCH, tạo NHIỀU tasks với due_date khác nhau. VD: "thứ 3 và thứ 5 hàng tuần đến hết tháng 9" → tạo ~34 tasks riêng lẻ.
+23. Project name phải VIẾT HOA đúng: GMA, HOSEL, SALES, EMPULSE, KV, EDU, TEACH, LEARN, PERSONAL, MATERIALS. Match case-insensitive từ user input.
 
 ## NOTION FIELDS (for create/edit)
 title, project (GMA|HOSEL|SALES|EMPULSE|KV|EDU|TEACH|LEARN|PERSONAL|MATERIALS),
 urgency (🔴 Fire|🟡 Important|🟢 Wait|⚪ Someday), energy (⚡ High|🔋 Med|😴 Low),
-estimate (minutes), due_date (YYYY-MM-DD), scheduled_time (YYYY-MM-DDTHH:mm — khi user nói giờ cụ thể),
+estimate (minutes), due_date (YYYY-MM-DD — BẮT BUỘC, default = hôm nay), scheduled_time (YYYY-MM-DDTHH:mm — khi user nói giờ cụ thể),
 block (☀️ AM|🌤️ PM|🌙 Power Block),
 source (EIT|Side Gig|Self|Personal), assigned_by, context, resource (URL)`;
 

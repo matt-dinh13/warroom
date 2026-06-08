@@ -130,6 +130,16 @@ export async function processChat(userMessage, env, chatId = 'web') {
       switch (action.type) {
         case 'create': {
           const taskData = action.data || {};
+
+          // Normalize project name (case-insensitive)
+          if (taskData.project) {
+            const upper = taskData.project.toUpperCase();
+            const validProjects = ['GMA', 'HOSEL', 'SALES', 'EMPULSE', 'KV', 'EDU', 'TEACH', 'LEARN', 'PERSONAL', 'MATERIALS'];
+            if (validProjects.includes(upper)) {
+              taskData.project = upper;
+            }
+          }
+
           // Auto-map source from project
           if (taskData.project && !taskData.source) {
             taskData.source = PROJECT_SOURCE_MAP[taskData.project] || 'EIT';
@@ -137,6 +147,12 @@ export async function processChat(userMessage, env, chatId = 'web') {
           // Auto-set materials defaults
           if (taskData.project === 'MATERIALS') {
             taskData.urgency = '⚪ Someday';
+          }
+
+          // Default due_date to today if not set
+          if (!taskData.due_date) {
+            const now = new Date(Date.now() + 7 * 3600000);
+            taskData.due_date = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
           }
 
           // Enrich with scheduled_time if user mentioned a time
@@ -244,6 +260,20 @@ export async function processChat(userMessage, env, chatId = 'web') {
       const fallbackTask = tryParseCaptureFromAIResponse(responseText, msg);
       if (fallbackTask) {
         try {
+          // Normalize project
+          if (fallbackTask.project) {
+            const upper = fallbackTask.project.toUpperCase();
+            const validProjects = ['GMA', 'HOSEL', 'SALES', 'EMPULSE', 'KV', 'EDU', 'TEACH', 'LEARN', 'PERSONAL', 'MATERIALS'];
+            if (validProjects.includes(upper)) fallbackTask.project = upper;
+          }
+          if (fallbackTask.project && !fallbackTask.source) {
+            fallbackTask.source = PROJECT_SOURCE_MAP[fallbackTask.project] || 'EIT';
+          }
+          // Default due_date
+          if (!fallbackTask.due_date) {
+            const now = new Date(Date.now() + 7 * 3600000);
+            fallbackTask.due_date = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
+          }
           enrichWithScheduledTime(fallbackTask, msg);
           notionResult = await createTask(fallbackTask, env);
           responseText = buildCaptureConfirmation(fallbackTask);
