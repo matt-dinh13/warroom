@@ -8,12 +8,13 @@
 
 ### Changes Made
 
-#### Vietnamese Weekday Parsing & Batch Creation (triage.js + index.js)
+#### Vietnamese Weekday Parsing & Batch Creation (triage.js + index.js + notion.js)
 | File | Change |
 |------|--------|
 | `triage.js` | Updated `tryDirectParse` to parse Vietnamese weekdays (`thứ 2` - `thứ 7`, `chủ nhật`) and return an array of tasks for multi-day schedules (e.g., "thứ 3 và thứ 5"). |
 | `triage.js` | Consolidated duplicate `case 'create_batch'` switch clauses into a single robust handler. It parses AI's task list (handling both `action.data.tasks` and `action.data` arrays) and falls back to `tryDirectParse` if no tasks are found or AI fails. |
 | `index.js` | Updated fallback handler to handle arrays returned by `tryDirectParse` (when MiniMax times out on multi-day creations). |
+| `notion.js` | Added `formatScheduledTime` helper to automatically append `+07:00` offset to timezone-less date-times when creating/updating tasks, ensuring they are stored in Notion in the correct timezone. |
 
 #### Calendar Timezone Alignment & Modal Fixes (public/app.js)
 | Aspect | Description |
@@ -31,6 +32,10 @@
 #### D2: Timezone-Aware Parsing
 - **Decision:** Parse using native browser `new Date()` conversion instead of UTC string slicing (`split('T')[0]`) for calendar positioning.
 - **Reason:** Notion returns datetime values. Slicing raw UTC values shifts tasks scheduled in early morning or late night to the wrong day/hour in the user's local timezone.
+
+#### D3: Enforce UTC+7 Timezone Offset in Notion Writes
+- **Decision:** Automatically append `+07:00` offset to scheduled times before writing to Notion database.
+- **Reason:** Notion API returns timezone-less dates in UTC (`Z`). By explicitly sending `+07:00` offset, the date-time is saved with the user's correct local timezone offset, preventing the browser from shifting the calendar event time.
 
 ---
 
