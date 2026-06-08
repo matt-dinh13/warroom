@@ -39,7 +39,7 @@ export async function callMiniMax(systemPrompt, userMessage, apiKey, messages = 
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const timeout = setTimeout(() => controller.abort(), 20000);
     try {
       response = await fetch(`${MINIMAX_BASE_URL}/chat/completions`, {
         ...fetchOpts,

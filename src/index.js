@@ -133,7 +133,20 @@ export default {
             );
           }
 
-          const result = await processChat(message, env, 'web');
+          let result;
+          try {
+            result = await processChat(message, env, 'web');
+          } catch (chatErr) {
+            console.error('Chat processing error:', chatErr);
+            const isTimeout = chatErr.message?.includes('abort') || chatErr.name === 'AbortError';
+            result = {
+              intent: 'CLARIFY',
+              response_text: isTimeout
+                ? '⏳ AI đang bận hoặc quá tải. Thử lại hoặc dùng lệnh nhanh:\n• `plan` — xem ưu tiên\n• `list` — danh sách task\n• Tạo đơn giản hơn (vd: "tạo task ISPAYEM, HOSEL, 30p")'
+                : `❌ Lỗi xử lý: ${chatErr.message?.substring(0, 100)}. Thử lại nhé.`,
+              needs_confirmation: false,
+            };
+          }
 
           // Security: sanitize before sending to client
           const safeResult = sanitizeResponse(result, env);
