@@ -4,6 +4,36 @@
 
 ---
 
+## 2026-06-08 — v5.4 Weekday Parsing + Multi-Task Batch + Calendar Timezone Fixes
+
+### Changes Made
+
+#### Vietnamese Weekday Parsing & Batch Creation (triage.js + index.js)
+| File | Change |
+|------|--------|
+| `triage.js` | Updated `tryDirectParse` to parse Vietnamese weekdays (`thứ 2` - `thứ 7`, `chủ nhật`) and return an array of tasks for multi-day schedules (e.g., "thứ 3 và thứ 5"). |
+| `triage.js` | Consolidated duplicate `case 'create_batch'` switch clauses into a single robust handler. It parses AI's task list (handling both `action.data.tasks` and `action.data` arrays) and falls back to `tryDirectParse` if no tasks are found or AI fails. |
+| `index.js` | Updated fallback handler to handle arrays returned by `tryDirectParse` (when MiniMax times out on multi-day creations). |
+
+#### Calendar Timezone Alignment & Modal Fixes (public/app.js)
+| Aspect | Description |
+|---------|-------------|
+| Timezone safety | Tasks now parsed using Date object local conversion instead of string splitting. This prevents tasks from shifting to the wrong hour slots (e.g., 7:30 AM instead of 2:30 PM due to UTC) or jumping to incorrect day columns (e.g., Sunday instead of Monday) due to timezone offsets. |
+| Date helper | Added `getDaysBetween(dateStr1, dateStr2)` to perform timezone-safe, UTC-based day differences between dates. |
+| Schedule Modal | Updated `openScheduleModal` to parse and show the scheduled date/time in the browser's local timezone correctly. |
+
+### Technical Decisions
+
+#### D1: Unified create_batch Case
+- **Decision:** Consolidate all batch creations under one `case 'create_batch'` in `triage.js`.
+- **Reason:** Prevent Wrangler's duplicate-case compiler warnings and handle diverse formats (AI structured JSON vs direct natural language parser fallback) cleanly.
+
+#### D2: Timezone-Aware Parsing
+- **Decision:** Parse using native browser `new Date()` conversion instead of UTC string slicing (`split('T')[0]`) for calendar positioning.
+- **Reason:** Notion returns datetime values. Slicing raw UTC values shifts tasks scheduled in early morning or late night to the wrong day/hour in the user's local timezone.
+
+---
+
 ## 2026-06-08 — v5.3 Calendar Fix + Light Mode + Auto-Schedule
 
 ### Changes Made
