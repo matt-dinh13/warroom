@@ -18,6 +18,8 @@ let calWeekStart = null; // Date object (Monday)
 let calTasks = [];
 let calModalTaskId = null;
 let calNowLineTimer = null;
+let calViewMode = 'day'; // 'day' or 'week'
+let calSelectedDate = null; // Date object for day view
 
 // ═══ DOM ═══
 const $ = id => document.getElementById(id);
@@ -501,16 +503,38 @@ function calInitWeek() {
   calWeekStart = new Date(now);
   calWeekStart.setDate(now.getDate() + diff);
   calWeekStart.setHours(0, 0, 0, 0);
+  calSelectedDate = new Date(now);
+  calSelectedDate.setHours(0, 0, 0, 0);
 }
 
-function calShiftWeek(delta) {
-  calWeekStart.setDate(calWeekStart.getDate() + delta * 7);
+function calShiftNav(delta) {
+  if (calViewMode === 'day') {
+    calSelectedDate.setDate(calSelectedDate.getDate() + delta);
+    // Update weekStart if day is outside current week
+    const dayDiff = Math.round((calSelectedDate - calWeekStart) / 86400000);
+    if (dayDiff < 0 || dayDiff > 6) {
+      const d = calSelectedDate.getDay();
+      const diff = d === 0 ? -6 : 1 - d;
+      calWeekStart = new Date(calSelectedDate);
+      calWeekStart.setDate(calSelectedDate.getDate() + diff);
+    }
+  } else {
+    calWeekStart.setDate(calWeekStart.getDate() + delta * 7);
+    calSelectedDate = new Date(calWeekStart);
+  }
   fetchCalendar();
 }
 
 function calGoToday() {
   calInitWeek();
   fetchCalendar();
+}
+
+function calSetViewMode(mode) {
+  calViewMode = mode;
+  $('cal-view-day')?.classList.toggle('active', mode === 'day');
+  $('cal-view-week')?.classList.toggle('active', mode === 'week');
+  renderCalendar();
 }
 
 async function fetchCalendar() {
@@ -538,12 +562,23 @@ function renderCalendar() {
   if (!grid || !calWeekStart) return;
   grid.innerHTML = '';
   const today = localDateStr(new Date());
+  const isDayView = calViewMode === 'day';
+  const numDays = isDayView ? 1 : 7;
+  const baseDate = isDayView ? calSelectedDate : calWeekStart;
 
-  // Update week label
-  const we = new Date(calWeekStart);
-  we.setDate(we.getDate() + 6);
-  const fmt = d => `${d.getDate()}/${d.getMonth() + 1}`;
-  $('cal-week-label').textContent = `${fmt(calWeekStart)} — ${fmt(we)} / ${calWeekStart.getFullYear()}`;
+  // Toggle grid class
+  grid.classList.toggle('day-view', isDayView);
+
+  // Update label
+  if (isDayView) {
+    const DAY_NAMES_FULL = ['Chủ Nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+    $('cal-week-label').textContent = `${DAY_NAMES_FULL[calSelectedDate.getDay()]} ${calSelectedDate.getDate()}/${calSelectedDate.getMonth() + 1}`;
+  } else {
+    const we = new Date(calWeekStart);
+    we.setDate(we.getDate() + 6);
+    const fmt = d => `${d.getDate()}/${d.getMonth() + 1}`;
+    $('cal-week-label').textContent = `${fmt(calWeekStart)} — ${fmt(we)} / ${calWeekStart.getFullYear()}`;
+  }
 
   // Time gutter header (top-left corner)
   const gutterHeader = document.createElement('div');
@@ -551,8 +586,8 @@ function renderCalendar() {
   grid.appendChild(gutterHeader);
 
   // Day headers
-  for (let d = 0; d < 7; d++) {
-    const date = new Date(calWeekStart);
+  for (let d = 0; d < numDays; d++) {
+    const date = new Date(baseDate);
     date.setDate(date.getDate() + d);
     const dateStr = localDateStr(date);
     const header = document.createElement('div');
@@ -586,13 +621,13 @@ function renderCalendar() {
     }
 
     // Day cells
-    for (let d = 0; d < 7; d++) {
+    for (let d = 0; d < numDays; d++) {
       const cell = document.createElement('div');
       cell.className = 'cal-cell' + (s % 2 === 0 ? ' hour-start' : '');
       cell.style.gridColumn = d + 2;
       cell.style.gridRow = row;
       // Click to schedule (empty slot)
-      const cellDate = new Date(calWeekStart);
+      const cellDate = new Date(baseDate);
       cellDate.setDate(cellDate.getDate() + d);
       const cellDateStr = localDateStr(cellDate);
       const cellTime = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
@@ -619,8 +654,8 @@ function renderCalendar() {
     const mins = parseInt(timePart.split(':')[1]) || 0;
 
     // Find which day column
-    const dayDiff = Math.round((new Date(dateStr) - new Date(localDateStr(calWeekStart))) / 86400000);
-    if (dayDiff < 0 || dayDiff > 6) return;
+    const dayDiff = Math.round((new Date(dateStr) - new Date(localDateStr(baseDate))) / 86400000);
+    if (dayDiff < 0 || dayDiff >= numDays) return;
 
     const slotIndex = (hours - CAL_START_HOUR) * 2 + Math.floor(mins / 30);
     if (slotIndex < 0 || slotIndex >= CAL_SLOTS) return;
@@ -672,8 +707,12 @@ function updateCalNowLine() {
   const m = now.getMinutes();
   if (h < CAL_START_HOUR || h >= CAL_END_HOUR) return;
 
-  const dayDiff = Math.round((new Date(today) - new Date(localDateStr(calWeekStart))) / 86400000);
-  if (dayDiff < 0 || dayDiff > 6) return;
+  const isDayView = calViewMode === 'day';
+  const numDays = isDayView ? 1 : 7;
+  const baseDate = isDayView ? calSelectedDate : calWeekStart;
+  if (!baseDate) return;
+  const dayDiff = Math.round((new Date(today) - new Date(localDateStr(baseDate))) / 86400000);
+  if (dayDiff < 0 || dayDiff >= numDays) return;
 
   const totalMins = (h - CAL_START_HOUR) * 60 + m;
   const slotFraction = totalMins / 30;
@@ -772,10 +811,12 @@ async function removeSchedule() {
 
 // Calendar event listeners (set up in DOMContentLoaded)
 document.addEventListener('DOMContentLoaded', () => {
-  $('cal-prev')?.addEventListener('click', () => calShiftWeek(-1));
-  $('cal-next')?.addEventListener('click', () => calShiftWeek(1));
+  $('cal-prev')?.addEventListener('click', () => calShiftNav(-1));
+  $('cal-next')?.addEventListener('click', () => calShiftNav(1));
   $('cal-today')?.addEventListener('click', calGoToday);
   $('cal-refresh')?.addEventListener('click', () => fetchCalendar());
+  $('cal-view-day')?.addEventListener('click', () => calSetViewMode('day'));
+  $('cal-view-week')?.addEventListener('click', () => calSetViewMode('week'));
   $('cal-modal-close')?.addEventListener('click', closeScheduleModal);
   $('cal-modal-overlay')?.addEventListener('click', (e) => {
     if (e.target === $('cal-modal-overlay')) closeScheduleModal();
@@ -783,3 +824,4 @@ document.addEventListener('DOMContentLoaded', () => {
   $('cal-modal-save')?.addEventListener('click', saveSchedule);
   $('cal-modal-remove')?.addEventListener('click', removeSchedule);
 });
+
