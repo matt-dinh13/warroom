@@ -104,6 +104,7 @@ Dùng context để:
 21. LUÔN set due_date. Nếu user không nói deadline → due_date = ngày hôm nay. Task KHÔNG CÓ due_date sẽ bị ẩn trên Board.
 22. Khi user yêu cầu "lặp lại" (recurring/hàng tuần/mỗi ngày) → dùng CAPTURE_BATCH, tạo NHIỀU tasks với due_date khác nhau. VD: "thứ 3 và thứ 5 hàng tuần đến hết tháng 9" → tạo ~34 tasks riêng lẻ.
 23. Project name phải VIẾT HOA đúng: GMA, HOSEL, SALES, EMPULSE, KV, EDU, TEACH, LEARN, PERSONAL, MATERIALS. Match case-insensitive từ user input.
+24. Khi user nói "giữ lại hôm nay / làm tối nay / power block / đừng dời / pin" cho 1 task → set block = "🌙 Power Block". Task có Power Block sẽ KHÔNG bị auto-defer lúc 23:30.
 
 ## NOTION FIELDS (for create/edit)
 title, project (GMA|HOSEL|SALES|EMPULSE|KV|EDU|TEACH|LEARN|PERSONAL|MATERIALS),

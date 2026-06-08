@@ -39,16 +39,35 @@ function formatScheduledTime(t) {
   return t;
 }
 
-export async function invalidateCache(env) {
+export async function invalidateCache(env, types = null) {
   if (!env.CHAT_MEMORY) return;
   try {
     const newToken = Date.now().toString();
-    await env.CHAT_MEMORY.put('cache:invalidation_token', newToken, { expirationTtl: 86400 });
-    console.log(`Cache invalidated. New token: ${newToken}`);
+    // types = null → invalidate ALL query types (safe default).
+    // types = ['today',...] → invalidate only those (scoped).
+    const targets = types || ALL_QUERY_TYPES;
+    await Promise.all(
+      targets.map(t => env.CHAT_MEMORY.put(`cache:token:${t}`, newToken, { expirationTtl: 86400 }))
+    );
   } catch (err) {
     console.error('Failed to invalidate cache:', err);
   }
 }
+
+// All cacheable query types
+const ALL_QUERY_TYPES = [
+  'today', 'upcoming', 'overdue', 'all_active', 'board_all',
+  'board_done_today', 'weekly_report', 'backlog', 'materials', 'calendar_week',
+];
+
+// Which query types each write op affects (scoped invalidation)
+const INVALIDATION_SCOPES = {
+  create: ['today', 'upcoming', 'overdue', 'all_active', 'board_all', 'calendar_week', 'backlog', 'materials'],
+  status: ['today', 'upcoming', 'overdue', 'all_active', 'board_all', 'board_done_today', 'weekly_report', 'calendar_week'],
+  edit: ['today', 'upcoming', 'overdue', 'all_active', 'board_all', 'calendar_week', 'backlog', 'materials'],
+  archive: ['today', 'upcoming', 'overdue', 'all_active', 'board_all', 'backlog', 'materials', 'calendar_week'],
+  schedule: ['board_all', 'calendar_week'],
+};
 
 function parseTimeStr(tStr) {
   let match = tStr.match(/(\d{1,2}):(\d{2})/);
@@ -165,7 +184,7 @@ export async function createTask(taskData, env) {
     properties['Scheduled'] = { date: { start: formatScheduledTime(normalized) } };
   }
 
-  const response = await fetch(`${NOTION_BASE}/pages`, {
+  const response = await fetchWithRetry(`${NOTION_BASE}/pages`, {
     method: 'POST',
     headers: notionHeaders(env.NOTION_API_KEY),
     body: JSON.stringify({
@@ -174,13 +193,8 @@ export async function createTask(taskData, env) {
     }),
   });
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Notion create error ${response.status}: ${err}`);
-  }
-
   const result = await response.json();
-  await invalidateCache(env);
+  await invalidateCache(env, INVALIDATION_SCOPES.create);
   return result;
 }
 
@@ -210,7 +224,7 @@ export async function queryTasks(queryType, env, options = {}) {
   let cacheKey = '';
   if (env.CHAT_MEMORY && !forceRefresh) {
     try {
-      token = (await env.CHAT_MEMORY.get('cache:invalidation_token')) || '0';
+      token = (await env.CHAT_MEMORY.get(`cache:token:${queryType}`)) || '0';
       cacheKey = `cache:query:${queryType}:${JSON.stringify(options)}:${token}`;
       const cached = await env.CHAT_MEMORY.get(cacheKey, 'json');
       if (cached) {
@@ -386,11 +400,10 @@ export async function queryTasks(queryType, env, options = {}) {
     try {
       if (forceRefresh) {
         token = Date.now().toString();
-        await env.CHAT_MEMORY.put('cache:invalidation_token', token, { expirationTtl: 86400 });
+        await env.CHAT_MEMORY.put(`cache:token:${queryType}`, token, { expirationTtl: 86400 });
       }
       const finalCacheKey = `cache:query:${queryType}:${JSON.stringify(options)}:${token}`;
       await env.CHAT_MEMORY.put(finalCacheKey, JSON.stringify(result), { expirationTtl: 300 }); // 5 minutes TTL
-      console.log(`Cache stored for ${queryType} with token ${token}`);
     } catch (err) {
       console.error('Cache write error:', err);
     }
@@ -420,7 +433,7 @@ export async function updateTaskStatusById(pageId, newStatus, env) {
   });
 
   const result = parseNotionTask(await response.json());
-  await invalidateCache(env);
+  await invalidateCache(env, INVALIDATION_SCOPES.status);
   return result;
 }
 
@@ -439,7 +452,7 @@ export async function updateTaskSchedule(pageId, scheduledISO, env) {
   });
 
   const result = parseNotionTask(await response.json());
-  await invalidateCache(env);
+  await invalidateCache(env, INVALIDATION_SCOPES.schedule);
   return result;
 }
 
@@ -570,7 +583,7 @@ export async function updateTaskStatus(taskTitle, newStatus, env) {
     return null;
   }
 
-  const updateResponse = await fetch(`${NOTION_BASE}/pages/${match.id}`, {
+  const updateResponse = await fetchWithRetry(`${NOTION_BASE}/pages/${match.id}`, {
     method: 'PATCH',
     headers: notionHeaders(env.NOTION_API_KEY),
     body: JSON.stringify({
@@ -580,12 +593,8 @@ export async function updateTaskStatus(taskTitle, newStatus, env) {
     }),
   });
 
-  if (!updateResponse.ok) {
-    throw new Error(`Notion update error: ${await updateResponse.text()}`);
-  }
-
   const result = parseNotionTask(await updateResponse.json());
-  await invalidateCache(env);
+  await invalidateCache(env, INVALIDATION_SCOPES.status);
   return result;
 }
 
@@ -692,18 +701,14 @@ export async function editTask(taskTitle, updates, env) {
     return parseNotionTask(match);
   }
 
-  const updateResponse = await fetch(`${NOTION_BASE}/pages/${match.id}`, {
+  const updateResponse = await fetchWithRetry(`${NOTION_BASE}/pages/${match.id}`, {
     method: 'PATCH',
     headers: notionHeaders(env.NOTION_API_KEY),
     body: JSON.stringify({ properties }),
   });
 
-  if (!updateResponse.ok) {
-    throw new Error(`Notion edit error: ${await updateResponse.text()}`);
-  }
-
   const result = parseNotionTask(await updateResponse.json());
-  await invalidateCache(env);
+  await invalidateCache(env, INVALIDATION_SCOPES.edit);
   return result;
 }
 
@@ -733,18 +738,14 @@ export async function archiveTask(taskTitle, env) {
   const title = match.properties?.Name?.title?.[0]?.text?.content || 'Untitled';
 
   // Archive the page
-  const archiveResponse = await fetch(`${NOTION_BASE}/pages/${match.id}`, {
+  const archiveResponse = await fetchWithRetry(`${NOTION_BASE}/pages/${match.id}`, {
     method: 'PATCH',
     headers: notionHeaders(env.NOTION_API_KEY),
     body: JSON.stringify({ archived: true }),
   });
 
-  if (!archiveResponse.ok) {
-    throw new Error(`Notion archive error: ${await archiveResponse.text()}`);
-  }
-
   const result = { id: match.id, title };
-  await invalidateCache(env);
+  await invalidateCache(env, INVALIDATION_SCOPES.archive);
   return result;
 }
 

@@ -116,9 +116,18 @@ async function sendAutoDeferSummary(env) {
 
   const tasks = await queryTasks('today', env);
   const completed = tasks.filter(t => t.status === 'Completed');
-  const remaining = tasks.filter(t => t.status !== 'Completed');
+  // Pinned tasks stay today: In progress (actively working) or Power Block (intentional night work)
+  const pinned = tasks.filter(t =>
+    t.status !== 'Completed' &&
+    (t.status === 'In progress' || t.block === '🌙 Power Block')
+  );
+  const remaining = tasks.filter(t =>
+    t.status !== 'Completed' &&
+    t.status !== 'In progress' &&
+    t.block !== '🌙 Power Block'
+  );
 
-  // Auto-defer remaining tasks to tomorrow
+  // Auto-defer remaining tasks to tomorrow (skip pinned)
   const tomorrow = new Date(Date.now() + 7 * 60 * 60 * 1000 + 86400000).toISOString().split('T')[0];
   let deferred = 0;
   for (const task of remaining) {
@@ -140,6 +149,7 @@ async function sendAutoDeferSummary(env) {
 
   let msg = `🌙 ${completed.length} done`;
   if (deferred > 0) msg += ` · ${deferred} → mai`;
+  if (pinned.length > 0) msg += ` · ${pinned.length} giữ lại`;
   if (!completed.length && !deferred) msg += `\n💤 Nghỉ ngơi. Mai mới.`;
   else if (deferred > 0) msg += `\n💤 Rest well.`;
   else msg += `\n🎉 Great day!`;

@@ -4,6 +4,40 @@
 
 ---
 
+## 2026-06-08 — v5.6 Reliability (Sprint 2)
+
+### Scope
+Fix 3 reliability gaps đúng về kỹ thuật, không cần chờ data.
+
+### Changes
+
+#### #1 — Notion write retry (429-safe)
+- **Vấn đề:** `createTask`/`updateTaskStatus`/`editTask`/`archiveTask` dùng `fetch` trần. Notion 429 lúc write = task mất, user không biết.
+- **Fix:** Chuyển sang `fetchWithRetry` — CHỈ retry trên 429 (request bị từ chối trước khi xử lý → an toàn, không thể tạo trùng). KHÔNG retry timeout/5xx (tránh duplicate).
+- **Quyết định an toàn:** Idempotency — 429 = chắc chắn chưa ghi → retry an toàn 100%.
+
+#### #2 — Per-query cache invalidation
+- **Vấn đề:** 1 global token (`cache:invalidation_token`) → mọi write xóa SẠCH cache mọi query type. Lúc active, cache vô dụng.
+- **Fix:** Token theo từng query type (`cache:token:{type}`). Mỗi write chỉ invalidate scope liên quan (vd: create không đụng `weekly_report`/`materials`).
+- **Scopes:** create/status/edit/archive/schedule — mỗi loại định nghĩa rõ query nào bị ảnh hưởng. Bulk ops vẫn invalidate tất cả (an toàn).
+- **Verified:** Sau create → `weekly_report` HIT, `today` MISS. Trước đây cả 2 đều MISS.
+
+#### #3 — Pin task (skip auto-defer)
+- **Vấn đề:** 23:30 cron move MỌI task chưa done sang mai — kể cả task cố ý để làm Power Block đêm.
+- **Fix:** Auto-defer skip task có `status = In progress` (đang làm) hoặc `block = 🌙 Power Block` (cố ý làm tối). Prompt rule #24: "giữ lại hôm nay/làm tối nay/pin" → set Power Block.
+- Summary hiển thị: "X done · Y → mai · Z giữ lại".
+
+### Verification
+| Test | Result |
+|------|--------|
+| Write retry (429 only) | ✅ Logic confirmed (fetchWithRetry) |
+| Cache: create → report HIT, today MISS | ✅ Scoped invalidation works |
+| Cache hit speed | ✅ 818ms → 4ms |
+| Pin: In progress + Power Block skip defer | ✅ Logic in place |
+| All modules syntax | ✅ Pass |
+
+---
+
 ## 2026-06-08 — v5.5 Analytics (Sprint 1: Đo lường)
 
 ### Scope
