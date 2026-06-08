@@ -129,7 +129,7 @@ echo "$JS" | grep -q 'fetchCalendar' && ok "fetchCalendar function" || fail "fet
 echo "$JS" | grep -q 'renderCalendar' && ok "renderCalendar function" || fail "renderCalendar" "missing"
 echo "$JS" | grep -q 'openScheduleModal' && ok "openScheduleModal function" || fail "Modal fn" "missing"
 echo "$JS" | grep -q 'saveSchedule' && ok "saveSchedule function" || fail "saveSchedule" "missing"
-echo "$JS" | grep -q 'calShiftWeek' && ok "Week navigation function" || fail "Week nav" "missing"
+echo "$JS" | grep -q 'calShiftNav' && ok "Week navigation function" || fail "Week nav" "missing"
 echo "$JS" | grep -q 'updateCalNowLine' && ok "Now line updater" || fail "Now line fn" "missing"
 echo "$JS" | grep -q 'handleLogout' && ok "Logout handler" || fail "Logout handler" "missing"
 echo "$JS" | grep -q 'CAL_START_HOUR.*7' && ok "Start hour = 7:00" || fail "Start hour" "wrong"

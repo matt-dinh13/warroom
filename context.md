@@ -1,7 +1,7 @@
 # 🚀 Stratt — Project Context
 
 > File này chứa đủ context để developer mới (hoặc AI agent) tiếp tục phát triển mà không cần hỏi lại.
-> Cập nhật lần cuối: 2026-06-08 (v5.4)
+> Cập nhật lần cuối: 2026-06-08 (v5.5)
 
 ---
 
@@ -254,4 +254,6 @@ TELEGRAM_CHAT_ID    — Matt's Telegram chat ID
 | **5.2** | **2026-06-08** | **Agentic upgrade — sarcastic personality, context injection, intent correction, 25 stress tests** |
 | **5.3** | **2026-06-08** | **Calendar Day/Week View, Light mode, Auto-schedule time parsing** |
 | **5.4** | **2026-06-08** | **Vietnamese weekday parsing, multi-day batch creation, calendar timezone alignment fixes** |
+| **5.5** | **2026-06-08** | **Default calendar to week view, Completed tasks visible on timeline, 24h toggle checkbox** |
+
 

@@ -4,6 +4,35 @@
 
 ---
 
+## 2026-06-08 — v5.5 Calendar Default Week view + Completed Tasks + 24h Toggle
+
+### Changes Made
+
+#### Default Week View & 24h Toggle (public/index.html + public/app.js + public/style.css)
+| File/Aspect | Change |
+|-------------|--------|
+| Default View | Calendar view mode defaults to `week` instead of `day`. Active class in HTML swapped to reflect this default. |
+| 24h Toggle | Added a checkbox (`#cal-show-24h`) in the toolbar actions. When checked, it renders all 24 hours (00:00 to 24:00, 48 slots) on the calendar. Unchecking toggles back to compact mode (07:00 to 23:00, 32 slots). |
+| Dynamic Rows | CSS Grid `gridTemplateRows` is set dynamically in JS on render to support 32 vs 48 rows based on toggle state and screen width. |
+
+#### Keep Completed Tasks on Timeline (src/notion.js + public/app.js + public/style.css)
+| Aspect | Description |
+|--------|-------------|
+| Query Filter | Notion query filter updated to fetch tasks that are active OR completed tasks that have a non-empty `Scheduled` field. |
+| Styling | Completed tasks are styled with 45% opacity, line-through text, and gray/disabled styling in both light and dark modes via `.cal-task[data-status="Completed"]`. |
+
+### Technical Decisions
+
+#### D1: Dynamic Grid Rows via JS
+- **Decision:** Set `gridTemplateRows` inline in javascript based on current slots and responsive width.
+- **Reason:** Simplifies CSS and prevents row mismatch between DOM cells (32 or 48) and CSS layout.
+
+#### D2: Scheduled Completed Task Query Optimization
+- **Decision:** Do not query all completed tasks, only those with a non-empty `Scheduled` date-time.
+- **Reason:** Prevents pagination overload by excluding completed tasks that were never scheduled on the timeline.
+
+---
+
 ## 2026-06-08 — v5.4 Weekday Parsing + Multi-Task Batch + Calendar Timezone Fixes
 
 ### Changes Made
