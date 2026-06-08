@@ -14,6 +14,37 @@ import { tryParseCaptureFromAIResponse, detectFallbackIntent, extractUpdateTarge
 const MEMORY_TTL = 86400; // 24h
 const MAX_MEMORY = 5;
 
+// ─── Scheduled Time Parser ─────────────────────────────
+// If user mentioned a specific time (10am, 2pm, 14:00, etc.),
+// parse it and set scheduled_time on the task data
+function enrichWithScheduledTime(taskData, userMsg) {
+  if (taskData.scheduled_time) return; // AI already set it
+  const timeMatch = userMsg.match(/(\d{1,2})\s*(?:h|:?\s*(?:00|30)?\s*)?\s*(?:am|pm|sáng|chiều|tối)/i)
+    || userMsg.match(/(\d{1,2}):(\d{2})/)
+    || userMsg.match(/(\d{1,2})\s*(?:am|pm)/i);
+  if (!timeMatch) return;
+
+  let hour = parseInt(timeMatch[1]);
+  const min = parseInt(timeMatch[2] || '0') || 0;
+  if (/pm|chiều|tối/i.test(userMsg) && hour < 12) hour += 12;
+  if (/am|sáng/i.test(userMsg) && hour === 12) hour = 0;
+
+  const now = new Date(Date.now() + 7 * 3600000); // VN time
+  const vnDateStr = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+  let schedDate = taskData.due_date || vnDateStr(now);
+  if (/mai|ngày mai|tomorrow/i.test(userMsg)) {
+    schedDate = vnDateStr(new Date(now.getTime() + 86400000));
+  }
+  taskData.scheduled_time = `${schedDate}T${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+  if (!taskData.due_date) taskData.due_date = schedDate;
+
+  // Also try to extract estimate if missing
+  if (!taskData.estimate) {
+    const estMatch = userMsg.match(/(\d+)\s*(?:phút|min(?:ute)?s?|p(?!m\b))/i);
+    if (estMatch) taskData.estimate = parseInt(estMatch[1]);
+  }
+}
+
 async function getConversation(chatId, env) {
   if (!env.CHAT_MEMORY) return [];
   try { return (await env.CHAT_MEMORY.get(`chat:${chatId}`, 'json')) || []; } catch { return []; }
@@ -107,6 +138,9 @@ export async function processChat(userMessage, env, chatId = 'web') {
           if (taskData.project === 'MATERIALS') {
             taskData.urgency = '⚪ Someday';
           }
+
+          // Enrich with scheduled_time if user mentioned a time
+          enrichWithScheduledTime(taskData, msg);
 
           if (aiResult.intent === 'CAPTURE_SPLIT' && action.data?.parent && action.data?.subtasks) {
             const parent = action.data.parent;
@@ -210,6 +244,7 @@ export async function processChat(userMessage, env, chatId = 'web') {
       const fallbackTask = tryParseCaptureFromAIResponse(responseText, msg);
       if (fallbackTask) {
         try {
+          enrichWithScheduledTime(fallbackTask, msg);
           notionResult = await createTask(fallbackTask, env);
           responseText = buildCaptureConfirmation(fallbackTask);
         } catch {}

@@ -108,6 +108,10 @@ export function buildCaptureConfirmation(d) {
   if (d.energy) r += ` | ${d.energy}`;
   if (d.estimate) r += `\n⏱ ${d.estimate}p`;
   if (d.due_date) r += ` | 📅 ${d.due_date}`;
+  if (d.scheduled_time) {
+    const t = d.scheduled_time.split('T')[1] || '';
+    r += `\n📅 Calendar: ${t} ${d.due_date || ''}`;
+  }
   if (d.assigned_by) r += `\n👤 ${d.assigned_by}`;
   r += `\n\n💡 Gõ "plan" để xem ưu tiên.`;
   return r;

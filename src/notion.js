@@ -99,6 +99,11 @@ export async function createTask(taskData, env) {
     properties['Resource'] = { url: taskData.resource };
   }
 
+  // Scheduled datetime (for calendar grid)
+  if (taskData.scheduled_time) {
+    properties['Scheduled'] = { date: { start: taskData.scheduled_time } };
+  }
+
   const response = await fetch(`${NOTION_BASE}/pages`, {
     method: 'POST',
     headers: notionHeaders(env.NOTION_API_KEY),
@@ -538,6 +543,9 @@ export async function editTask(taskTitle, updates, env) {
     properties['Notes'] = {
       rich_text: [{ text: { content: value } }],
     };
+  }
+  if (updates.scheduled_time) {
+    properties['Scheduled'] = { date: { start: updates.scheduled_time } };
   }
   if (updates.title || updates.name) {
     const value = updates.title || updates.name;
