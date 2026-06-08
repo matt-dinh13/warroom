@@ -211,10 +211,14 @@
         </div>
         <span class="cal-week-label" id="cal-week-label">Week</span>
         <div class="cal-view-toggle">
-          <button class="cal-view-btn active" id="cal-view-day" title="Day view">Day</button>
-          <button class="cal-view-btn" id="cal-view-week" title="Week view">Week</button>
+          <button class="cal-view-btn" id="cal-view-day" title="Day view">Day</button>
+          <button class="cal-view-btn active" id="cal-view-week" title="Week view">Week</button>
         </div>
         <div class="cal-actions">
+          <label class="cal-24h-label" style="display: flex; align-items: center; gap: 4px; font-size: var(--text-xs); color: var(--text-2); cursor: pointer; user-select: none; margin-right: 8px;">
+            <input type="checkbox" id="cal-show-24h" style="accent-color: var(--accent); cursor: pointer;">
+            <span>24h</span>
+          </label>
           <button class="cal-nav-btn" id="cal-refresh" title="Refresh">🔄</button>
         </div>
       </div>

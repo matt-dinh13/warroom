@@ -651,6 +651,17 @@ body {
   background: oklch(0.20 0.01 250); border-left-color: var(--someday); color: var(--text-2);
 }
 
+.cal-task[data-status="Completed"] {
+  opacity: 0.45;
+  text-decoration: line-through;
+  background: var(--surface-3) !important;
+  border-left-color: var(--text-3) !important;
+  color: var(--text-3) !important;
+}
+.cal-task[data-status="Completed"] .cal-task-project {
+  color: var(--text-3) !important;
+}
+
 /* Current time line */
 .cal-now-line {
   position: absolute; left: 0; right: 0; height: 2px;

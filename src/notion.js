@@ -277,10 +277,12 @@ export async function queryTasks(queryType, env, options = {}) {
       break;
 
     case 'calendar_week': {
-      // Calendar: fetch all active (non-completed) tasks
-      // Client side filters by week range — simpler and avoids Notion nested filter issues
+      // Calendar: fetch active tasks OR completed tasks that are scheduled
       filter = {
-        property: 'State', status: { does_not_equal: 'Completed' },
+        or: [
+          { property: 'State', status: { does_not_equal: 'Completed' } },
+          { property: 'Scheduled', date: { is_not_empty: true } }
+        ]
       };
       break;
     }

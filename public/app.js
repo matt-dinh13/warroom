@@ -18,7 +18,7 @@ let calWeekStart = null; // Date object (Monday)
 let calTasks = [];
 let calModalTaskId = null;
 let calNowLineTimer = null;
-let calViewMode = 'day'; // 'day' or 'week'
+let calViewMode = 'week'; // 'day' or 'week'
 let calSelectedDate = null; // Date object for day view
 
 // ═══ DOM ═══
@@ -530,6 +530,14 @@ function getDaysBetween(dateStr1, dateStr2) {
   return Math.round((utc1 - utc2) / 86400000);
 }
 
+function getCalConfig() {
+  const is24h = $('cal-show-24h')?.checked;
+  const startHour = is24h ? 0 : 7;
+  const endHour = is24h ? 24 : 23;
+  const slots = (endHour - startHour) * 2;
+  return { startHour, endHour, slots };
+}
+
 function calInitWeek() {
   const now = new Date();
   const day = now.getDay();
@@ -600,6 +608,9 @@ function renderCalendar() {
   const numDays = isDayView ? 1 : 7;
   const baseDate = isDayView ? calSelectedDate : calWeekStart;
 
+  const { startHour, endHour, slots } = getCalConfig();
+  grid.style.gridTemplateRows = `40px repeat(${slots}, ${window.innerWidth >= 768 ? '32px' : '28px'})`;
+
   // Toggle grid class
   grid.classList.toggle('day-view', isDayView);
 
@@ -633,8 +644,8 @@ function renderCalendar() {
   }
 
   // Time slots + cells
-  for (let s = 0; s < CAL_SLOTS; s++) {
-    const hour = CAL_START_HOUR + Math.floor(s / 2);
+  for (let s = 0; s < slots; s++) {
+    const hour = startHour + Math.floor(s / 2);
     const min = (s % 2) * 30;
     const row = s + 2; // row 1 is header
 
@@ -660,15 +671,10 @@ function renderCalendar() {
       cell.className = 'cal-cell' + (s % 2 === 0 ? ' hour-start' : '');
       cell.style.gridColumn = d + 2;
       cell.style.gridRow = row;
-      // Click to schedule (empty slot)
       const cellDate = new Date(baseDate);
       cellDate.setDate(cellDate.getDate() + d);
       const cellDateStr = localDateStr(cellDate);
       const cellTime = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
-      cell.addEventListener('click', () => {
-        // If there's a dragged task, could schedule it here
-        // For now just open modal if we have a pending task
-      });
       cell.dataset.date = cellDateStr;
       cell.dataset.time = cellTime;
       grid.appendChild(cell);
@@ -695,8 +701,8 @@ function renderCalendar() {
     const dayDiff = getDaysBetween(dateStr, localDateStr(baseDate));
     if (dayDiff < 0 || dayDiff >= numDays) return;
 
-    const slotIndex = (hours - CAL_START_HOUR) * 2 + Math.floor(mins / 30);
-    if (slotIndex < 0 || slotIndex >= CAL_SLOTS) return;
+    const slotIndex = (hours - startHour) * 2 + Math.floor(mins / 30);
+    if (slotIndex < 0 || slotIndex >= slots) return;
 
     const duration = task.estimate || 30;
     const slotSpan = Math.max(1, Math.ceil(duration / 30));
@@ -708,6 +714,7 @@ function renderCalendar() {
     block.className = 'cal-task';
     block.dataset.urgency = task.urgency || '';
     block.dataset.taskId = task.id;
+    block.dataset.status = task.status || '';
     block.innerHTML = `<div class="cal-task-title">${task.title}</div><div class="cal-task-project">${task.project} · ${duration}m</div>`;
     block.style.gridColumn = col;
     block.style.gridRow = `${rowStart} / span ${slotSpan}`;
@@ -743,7 +750,9 @@ function updateCalNowLine() {
   const today = localDateStr(now);
   const h = now.getHours();
   const m = now.getMinutes();
-  if (h < CAL_START_HOUR || h >= CAL_END_HOUR) return;
+  
+  const { startHour, endHour, slots } = getCalConfig();
+  if (h < startHour || h >= endHour) return;
 
   const isDayView = calViewMode === 'day';
   const numDays = isDayView ? 1 : 7;
@@ -752,7 +761,7 @@ function updateCalNowLine() {
   const dayDiff = getDaysBetween(today, localDateStr(baseDate));
   if (dayDiff < 0 || dayDiff >= numDays) return;
 
-  const totalMins = (h - CAL_START_HOUR) * 60 + m;
+  const totalMins = (h - startHour) * 60 + m;
   const slotFraction = totalMins / 30;
   const row = Math.floor(slotFraction) + 2;
   const fractional = slotFraction % 1;
@@ -868,5 +877,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   $('cal-modal-save')?.addEventListener('click', saveSchedule);
   $('cal-modal-remove')?.addEventListener('click', removeSchedule);
+  $('cal-show-24h')?.addEventListener('change', () => renderCalendar());
 });
 
