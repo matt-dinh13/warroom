@@ -1,7 +1,7 @@
 # 🚀 Stratt — Project Context
 
 > File này chứa đủ context để developer mới (hoặc AI agent) tiếp tục phát triển mà không cần hỏi lại.
-> Cập nhật lần cuối: 2026-06-08 (v5.2)
+> Cập nhật lần cuối: 2026-06-08 (v5.3)
 
 ---
 
@@ -14,13 +14,15 @@
 **Key UX:**
 - AI nhớ ngữ cảnh hội thoại (5 tin nhắn, KV memory) + task context injection
 - AI personality: sarcastic, proactive (warn overdue/overload)
+- **Auto-Schedule:** Nói giờ ("2pm chiều nay") → task tự có Scheduled datetime → hiện trên calendar grid
 - **Kanban Board** tab: 4 cột (To Do, In Progress, Pending, Done Today), filter + quick add
-- **Calendar Timeblock** tab: Week view 7:00–23:00, 30-min blocks, tap-to-schedule
+- **Calendar Timeblock** tab: Day/Week toggle, 7:00–23:00, 30-min blocks, tap-to-schedule
 - Instant commands (~60% messages skip AI, <1s response)
 - Smart cron reminders (Telegram), skip khi không cần
 - Materials storage (links, guides, notes)
 - **PWA** installable trên iPad, Wake Lock always-on
-- **Phong Thủy color theme** (Mệnh Thủy 💧 — Navy blue accent)
+- **Light/Dark mode** toggle (🌙/☀️) — persists via localStorage
+- **Phong Thủy color theme** (Mệnh Thủy 💧 — Navy blue accent, cả 2 modes)
 
 **Không có:** Gamification (XP, streak, achievements) — đã bỏ ở v5.0.
 
@@ -44,11 +46,11 @@ Cloudflare Worker (src/index.js)
   ├→ Rate Limiter (30 req/min per IP)
   ├→ src/auth.js          — SHA-256 password gate + Secure cookies + Logout
   ├→ src/commands.js      — Instant regex commands (plan, list, overdue, etc.)
-  ├→ src/triage.js        — Agentic orchestrator + memory + context injection + intent correction
+  ├→ src/triage.js        — Agentic orchestrator + memory + context injection + intent correction + enrichWithScheduledTime()
   │    ├→ src/minimax.js    — MiniMax-M2.7 (timeout + retry)
-  │    ├→ src/notion.js     — Notion CRUD + pagination + retry-backoff
-  │    ├→ src/prompts.js    — Sarcastic prompt (v5.2) + 11 few-shot examples
-  │    ├→ src/responses.js  — Response builders (sarcastic roast + next-task suggestion)
+  │    ├→ src/notion.js     — Notion CRUD + pagination + retry-backoff (supports scheduled_time)
+  │    ├→ src/prompts.js    — Sarcastic prompt (v5.3) + 13 few-shot examples (incl. time scheduling)
+  │    ├→ src/responses.js  — Response builders (sarcastic roast + next-task suggestion + calendar confirmation)
   │    └→ src/parsers.js    — Fallback JSON parsers
   ├→ src/telegram.js      — Webhook + inline keyboard + HTML parse mode
   ├→ src/reminders.js     — Smart cron (skip logic, no gamification)

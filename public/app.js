@@ -57,6 +57,7 @@ const boardLoading = $('board-loading');
 
 // ═══ Init ═══
 document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
   updateClock();
   setInterval(updateClock, 60000);
   checkAuth();
@@ -99,8 +100,30 @@ function setupEventListeners() {
   // Wake Lock
   $('btn-wake-lock').addEventListener('click', toggleWakeLock);
 
+  // Theme toggle
+  $('btn-theme').addEventListener('click', toggleTheme);
+
   // Logout
   $('btn-logout').addEventListener('click', handleLogout);
+}
+
+// ═══ Theme ═══
+function initTheme() {
+  const saved = localStorage.getItem('stratt-theme') || 'dark';
+  applyTheme(saved);
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  localStorage.setItem('stratt-theme', next);
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = $('btn-theme');
+  if (btn) btn.textContent = theme === 'dark' ? '🌙' : '☀️';
 }
 
 // ═══ Logout ═══
@@ -534,7 +557,7 @@ function calSetViewMode(mode) {
   calViewMode = mode;
   $('cal-view-day')?.classList.toggle('active', mode === 'day');
   $('cal-view-week')?.classList.toggle('active', mode === 'week');
-  renderCalendar();
+  fetchCalendar(); // re-fetch + re-render
 }
 
 async function fetchCalendar() {

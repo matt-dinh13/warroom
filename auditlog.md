@@ -4,6 +4,53 @@
 
 ---
 
+## 2026-06-08 — v5.3 Calendar Fix + Light Mode + Auto-Schedule
+
+### Changes Made
+
+#### Auto-Schedule from Chat (prompts.js + triage.js + notion.js)
+| File | Change |
+|------|--------|
+| `prompts.js` | Added `scheduled_time` field, 2 few-shot time examples, rule 20 |
+| `triage.js` | `enrichWithScheduledTime()` — parses time from msg, applies to both AI + fallback paths |
+| `notion.js` | `createTask` + `editTask` now support `Scheduled` property |
+| `responses.js` | Confirmation shows `📅 Calendar: 14:00` when scheduled |
+
+#### Calendar Day/Week View Toggle (app.js + index.html + style.css)
+| Feature | Description |
+|---------|-------------|
+| Day view | Default. Single column, full width. Label: "Thứ 2 8/6" |
+| Week view | 7 columns. Label: "8/6 — 14/6 / 2026" |
+| Toggle | Segmented control (Day/Week) in toolbar |
+| Navigation | ◀/▶ shifts 1 day (day mode) or 1 week (week mode) |
+| Bug fix | Task blocks used `position: absolute` → CSS Grid placement |
+
+#### Light Mode (style.css + app.js + index.html)
+| Feature | Description |
+|---------|-------------|
+| Token overrides | `[data-theme="light"]` overrides 20 CSS tokens |
+| Toggle | 🌙/☀️ button in header |
+| Persistence | `localStorage('stratt-theme')` |
+| Calendar | Light-mode task block colors adapted |
+| Phong Thủy | Navy hue 250 preserved across both modes |
+
+### Technical Decisions
+
+#### D1: Auto-Schedule Fallback (Code > AI)
+- **Decision:** Parse time from user message in JS, not rely on AI
+- **Reason:** MiniMax ignores new fields despite few-shot examples. Code fallback catches "2pm", "10am", "14:00"
+- **Risk:** Regex may false-positive on numbers. Mitigated with negative lookahead `/p(?!m\b)/`
+
+#### D2: Default Day View
+- **Decision:** Calendar defaults to Day view
+- **Reason:** User preference — "calendar tôi hay dùng day view"
+
+#### D3: Light Mode Strategy
+- **Decision:** CSS custom properties override only, no JS class toggling per component
+- **Reason:** Design system already 100% tokenized. Single `data-theme` attribute on `<html>` is enough.
+
+---
+
 ## 2026-06-08 — v5.2 Agentic Upgrade (Sarcastic Personality + Context Awareness)
 
 ### Changes Made
