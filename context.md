@@ -1,7 +1,7 @@
 # 🚀 Stratt — Project Context
 
 > File này chứa đủ context để developer mới (hoặc AI agent) tiếp tục phát triển mà không cần hỏi lại.
-> Cập nhật lần cuối: 2026-06-08 (v5.7)
+> Cập nhật lần cuối: 2026-06-08 (v5.8)
 
 ---
 
@@ -257,5 +257,6 @@ TELEGRAM_CHAT_ID    — Matt's Telegram chat ID
 | **5.5** | **2026-06-08** | **Default calendar to week view, Completed tasks visible on timeline, 24h toggle checkbox** |
 | **5.6** | **2026-06-08** | **Increase MiniMax API timeout to 60 seconds** |
 | **5.7** | **2026-06-08** | **Notion task caching in Cloudflare KV & AI duplicate verification grounding** |
+| **5.8** | **2026-06-08** | **Robust scheduled_time normalization (time-only inputs) in createTask/editTask** |
 
 

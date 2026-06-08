@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-06-08 — v5.8 Robust scheduled_time Normalization
+
+### Changes Made
+
+#### Time Normalizer Helpers (src/notion.js)
+- Implemented `parseTimeStr(tStr)` in [notion.js](file:///Users/mac/rocky/warroom/src/notion.js) to parse HH:mm, HH:mm am/pm, or generic time strings like "7pm" or "10am".
+- Implemented `normalizeScheduledTime(tStr, defaultDate)` to combine time-only strings with a default date part, resolving full ISO `YYYY-MM-DDTHH:mm` datetimes.
+
+#### Creation & Edit Paths (src/notion.js)
+- Updated `createTask` to automatically pass the parsed `scheduled_time` through `normalizeScheduledTime(scheduled_time, due_date)`.
+- Updated `editTask` to fetch the task's existing deadline/due date from the matched Notion page, combine it with the time-only edit instruction, and save a fully qualified datetime.
+
+### Technical Decisions
+
+#### D1: Normalizing inside database client vs AI triage
+- **Decision:** Perform the time-only normalization directly inside `createTask` and `editTask` in [notion.js](file:///Users/mac/rocky/warroom/src/notion.js), rather than expecting the LLM or triage router to format it correctly.
+- **Reasoning:** Probabilistic models (like MiniMax) frequently get lazy and output only the time part (e.g. `"19:00"`) instead of the full datetime. By checking and fixing it programmatically in the database write layer, we guarantee 100% resilience against LLM format variations.
+
+---
+
 ## 2026-06-08 — v5.7 KV Caching & AI Duplicate Verification Grounding
 
 ### Changes Made

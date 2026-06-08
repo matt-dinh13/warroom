@@ -50,6 +50,38 @@ export async function invalidateCache(env) {
   }
 }
 
+function parseTimeStr(tStr) {
+  let match = tStr.match(/(\d{1,2}):(\d{2})/);
+  if (match) {
+    return { hour: parseInt(match[1]), min: parseInt(match[2]) };
+  }
+  match = tStr.match(/(\d{1,2})\s*(?:h|:?\s*(?:00|30)?\s*)?\s*(?:am|pm|sáng|chiều|tối)/i)
+    || tStr.match(/(\d{1,2})\s*(?:am|pm)/i);
+  if (match) {
+    let hour = parseInt(match[1]);
+    const min = 0;
+    if (/pm|chiều|tối/i.test(tStr) && hour < 12) hour += 12;
+    if (/am|sáng/i.test(tStr) && hour === 12) hour = 0;
+    return { hour, min };
+  }
+  return null;
+}
+
+function normalizeScheduledTime(tStr, defaultDate) {
+  if (!tStr) return null;
+  if (tStr.includes('T')) return tStr;
+
+  const parsed = parseTimeStr(tStr);
+  if (parsed) {
+    const datePart = defaultDate ? defaultDate.substring(0, 10) : new Date(Date.now() + 7 * 3600000).toISOString().split('T')[0];
+    const hour = String(parsed.hour).padStart(2, '0');
+    const min = String(parsed.min).padStart(2, '0');
+    return `${datePart}T${hour}:${min}`;
+  }
+  return tStr;
+}
+
+
 /**
  * Create a new task in the existing "Today" Notion DB
  */
@@ -129,7 +161,8 @@ export async function createTask(taskData, env) {
 
   // Scheduled datetime (for calendar grid)
   if (taskData.scheduled_time) {
-    properties['Scheduled'] = { date: { start: formatScheduledTime(taskData.scheduled_time) } };
+    const normalized = normalizeScheduledTime(taskData.scheduled_time, taskData.due_date);
+    properties['Scheduled'] = { date: { start: formatScheduledTime(normalized) } };
   }
 
   const response = await fetch(`${NOTION_BASE}/pages`, {
@@ -617,7 +650,10 @@ export async function editTask(taskTitle, updates, env) {
     };
   }
   if (updates.scheduled_time) {
-    properties['Scheduled'] = { date: { start: formatScheduledTime(updates.scheduled_time) } };
+    const existingDate = match.properties?.Deadline?.date?.start || match.properties?.['Do Date']?.date?.start || new Date(Date.now() + 7 * 3600000).toISOString().split('T')[0];
+    const defaultDate = updates.deadline || existingDate;
+    const normalized = normalizeScheduledTime(updates.scheduled_time, defaultDate);
+    properties['Scheduled'] = { date: { start: formatScheduledTime(normalized) } };
   }
   if (updates.title || updates.name) {
     const value = updates.title || updates.name;
