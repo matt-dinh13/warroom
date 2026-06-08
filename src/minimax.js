@@ -74,9 +74,6 @@ export async function callMiniMax(systemPrompt, userMessage, apiKey, messages = 
   // MiniMax M2.7 wraps reasoning in <think>...</think> tags — strip them
   content = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 
-  // Debug: log raw content for diagnosing CAPTURE failures
-  console.log('MiniMax raw (first 300):', content.substring(0, 300));
-
   // ─── Robust JSON extraction ─────────────────────────────
   // AI sometimes returns text + ```json {...} ``` or text + bare JSON
   // Strategy 1: Try direct parse (pure JSON response)

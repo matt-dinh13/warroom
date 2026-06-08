@@ -321,8 +321,6 @@ export async function processChat(userMessage, env, chatId = 'web') {
             if (parsed) batchTasks = Array.isArray(parsed) ? parsed : [parsed];
           }
 
-          console.log('create_batch tasks:', batchTasks.length, batchTasks.map(t => t.title + ' / ' + t.due_date));
-
           for (const t of batchTasks) {
             // Normalize each task
             if (t.project) {
@@ -439,10 +437,8 @@ export async function processChat(userMessage, env, chatId = 'web') {
   }
 
   // ═══ PHASE 3.5: CAPTURE_BATCH fallback (AI returned intent but didn't create) ═══
-  console.log('Phase 3.5 check:', { notionResult: !!notionResult, intent: aiResult.intent, hasAction: !!action });
   if (!notionResult && (aiResult.intent === 'CAPTURE_BATCH' || (aiResult.intent === 'CAPTURE' && !action))) {
     const directResult = tryDirectParse(msg);
-    console.log('Phase 3.5 directResult:', directResult);
     if (directResult) {
       try {
         const tasks = Array.isArray(directResult) ? directResult : [directResult];

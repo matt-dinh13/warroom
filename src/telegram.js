@@ -206,14 +206,17 @@ export async function sendTelegramMessage(botToken, chatId, text, parseMode = nu
   return response;
 }
 
-export async function setTelegramWebhook(botToken, webhookUrl) {
+export async function setTelegramWebhook(botToken, webhookUrl, secretToken = null) {
+  const body = {
+    url: webhookUrl,
+    allowed_updates: ['message', 'callback_query'],
+  };
+  if (secretToken) body.secret_token = secretToken;
+
   const response = await fetch(`${TELEGRAM_API}${botToken}/setWebhook`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      url: webhookUrl,
-      allowed_updates: ['message', 'callback_query'],
-    }),
+    body: JSON.stringify(body),
   });
   return response.json();
 }

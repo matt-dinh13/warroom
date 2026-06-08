@@ -18,7 +18,8 @@ const SAFE_COMMANDS = [
   { type: 'backlog',  regex: /^(?:backlog|ý tưởng|có gì làm|có gì làm không)$/i },
   { type: 'materials',regex: /^(?:materials?|tài liệu|link|guides?)$/i },
   { type: 'done_num', regex: /^(?:done|xong)\s+(\d+)$/i },
-  { type: 'done_name',regex: /^(?:done|xong)\s+(.{3,})$/i },
+  // done_name: max ~6 words to avoid matching full sentences ("xong việc rồi nghỉ thôi")
+  { type: 'done_name',regex: /^(?:done|xong)\s+(\S+(?:\s+\S+){0,5})$/i },
 ];
 
 /**

@@ -96,9 +96,17 @@ Stratt là một CF Workers app quản lý task qua chat (AI + Notion), có kèm
 2. ~~Vá XSS calendar (M1)~~ — ✅ Done
 3. ~~Đồng bộ version (L3)~~ — ✅ Done
 4. ~~Dọn dead code (L2)~~ — ✅ Done
-5. **Telegram webhook secret (L6)** — nên làm nếu lo bị spoof
-6. **Gắn cờ DEBUG cho console.log (L5)** — dọn log production
-7. **Tách `tryDirectParse` về parsers.js (L4)** — gom logic parse 1 chỗ
+5. ~~Telegram webhook secret (L6)~~ — ✅ Done (verify `X-Telegram-Bot-Api-Secret-Token`, set qua env `TELEGRAM_WEBHOOK_SECRET`)
+6. ~~Dọn console.log debug (L5)~~ — ✅ Done (bỏ log verbose, giữ console.error)
+7. ~~`done_name` đóng nhầm task (L1)~~ — ✅ Done (giới hạn ≤6 từ, câu dài → AI xử lý)
+8. **Tách `tryDirectParse` về parsers.js (L4)** — chưa làm (refactor thuần, không gấp, để tránh churn)
+
+### Kích hoạt Telegram webhook secret (tùy chọn)
+```bash
+wrangler secret put TELEGRAM_WEBHOOK_SECRET   # nhập 1 chuỗi ngẫu nhiên
+# rồi gọi lại /api/setup-telegram để đăng ký secret với Telegram
+```
+Nếu không set env này, webhook vẫn hoạt động như cũ (backwards compatible).
 
 ---
 

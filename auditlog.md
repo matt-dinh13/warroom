@@ -4,6 +4,34 @@
 
 ---
 
+## 2026-06-08 — v5.4.2 Audit Hardening
+
+### Scope
+Fix remaining audit findings (L1, L5, L6).
+
+### Changes
+
+| Finding | Fix | File |
+|---------|-----|------|
+| L6: Telegram webhook no secret verify | Verify `X-Telegram-Bot-Api-Secret-Token` header against `TELEGRAM_WEBHOOK_SECRET` env. `setWebhook` now registers the secret. Backwards compatible (skip if env unset). | `index.js`, `telegram.js` |
+| L1: `done_name` could close wrong task | Limited regex to ≤6 words — long sentences ("xong việc rồi nghỉ thôi") now route to AI instead of blindly fuzzy-matching | `commands.js` |
+| L5: Debug console.logs in production | Removed verbose `console.log` (MiniMax raw, Phase 3.5, create_batch). Kept `console.error` for real errors | `minimax.js`, `triage.js` |
+| — | Added `findBestMatchWithScore` helper (exposes fuzzy score for future confirmation logic) | `notion.js` |
+
+### Not Fixed (intentional)
+- L4: `tryDirectParse` stays in triage.js — pure refactor, no functional gain, avoid churn.
+
+### Verification
+| Test | Result |
+|------|--------|
+| Telegram webhook (no secret set) | ✅ Works (backwards compat) |
+| "xong review code" (short) | ✅ UPDATE instant |
+| "xong việc rồi giờ tính nghỉ ngơi..." (long) | ✅ Routed to AI, no false task close |
+| health version | ✅ 5.4.2 |
+| All modules syntax | ✅ Pass |
+
+---
+
 ## 2026-06-08 — v5.4.1 Code Audit + Fixes
 
 ### Scope

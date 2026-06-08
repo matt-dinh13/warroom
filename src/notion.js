@@ -495,6 +495,14 @@ function fuzzyScore(query, title) {
  * Returns null if no decent match found (score < 30)
  */
 function findBestMatch(tasks, searchTitle) {
+  const { match } = findBestMatchWithScore(tasks, searchTitle);
+  return match;
+}
+
+/**
+ * Find best match and return both the match and its score
+ */
+function findBestMatchWithScore(tasks, searchTitle) {
   let bestMatch = null;
   let bestScore = 0;
 
@@ -507,7 +515,7 @@ function findBestMatch(tasks, searchTitle) {
     }
   }
 
-  return bestScore >= 30 ? bestMatch : null;
+  return { match: bestScore >= 30 ? bestMatch : null, score: bestScore };
 }
 
 /**

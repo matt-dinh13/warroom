@@ -197,7 +197,7 @@ export default {
             JSON.stringify({
               status: 'ok',
               timestamp: new Date().toISOString(),
-              version: '5.4.1',
+              version: '5.4.2',
               telegram: !!env.TELEGRAM_BOT_TOKEN,
               cron: true,
             }),
@@ -336,6 +336,14 @@ export default {
 
         // POST /api/telegram — Telegram webhook endpoint
         if (path === '/api/telegram' && request.method === 'POST') {
+          // Verify secret token (set during setWebhook) to block spoofed requests
+          const secret = env.TELEGRAM_WEBHOOK_SECRET;
+          if (secret) {
+            const provided = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
+            if (provided !== secret) {
+              return new Response('Forbidden', { status: 403 });
+            }
+          }
           const update = await request.json();
           return await handleTelegramWebhook(update, env, processChat);
         }
@@ -351,7 +359,7 @@ export default {
 
           const workerUrl = url.origin;
           const webhookUrl = `${workerUrl}/api/telegram`;
-          const result = await setTelegramWebhook(env.TELEGRAM_BOT_TOKEN, webhookUrl);
+          const result = await setTelegramWebhook(env.TELEGRAM_BOT_TOKEN, webhookUrl, env.TELEGRAM_WEBHOOK_SECRET || null);
           return new Response(
             JSON.stringify({ webhook_url: webhookUrl, telegram_response: result }),
             { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
