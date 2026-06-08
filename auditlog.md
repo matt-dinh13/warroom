@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-06-08 — v5.6 MiniMax API Timeout Increase
+
+### Changes Made
+
+#### MiniMax API Client (src/minimax.js)
+- Increased execution abort timeout for chat completion API requests from `20000ms` (20s) to `60000ms` (60s / 1 minute).
+- Updated internal inline comment from "15s timeout" to "60s timeout".
+
+### Technical Decisions
+
+#### D1: Permissible Wall-clock limits
+- **Decision:** Increase timeout to 60s per attempt to avoid pre-mature aborts on sluggish API responses.
+- **Reasoning:** Since the user is not in a hurry and can wait, increasing the timeout minimizes the frequency of false-positive overload errors during slow API response times. Note that under Cloudflare Workers execution rules, wall-clock time limit for HTTP requests might be strictly bound to 30s depending on the plan, so the worker might still face client gateway timeouts if the total API response exceeds 30s, but this allows for the absolute maximum time window possible.
+
+---
+
 ## 2026-06-08 — v5.5 Calendar Default Week view + Completed Tasks + 24h Toggle
 
 ### Changes Made

@@ -21,7 +21,7 @@ export async function callMiniMax(systemPrompt, userMessage, apiKey, messages = 
     { role: 'user', content: userMessage },
   ];
 
-  // Fetch with 15s timeout + 1 retry
+  // Fetch with 60s timeout
   let response;
   const fetchOpts = {
     method: 'POST',
@@ -39,7 +39,7 @@ export async function callMiniMax(systemPrompt, userMessage, apiKey, messages = 
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
+    const timeout = setTimeout(() => controller.abort(), 60000);
     try {
       response = await fetch(`${MINIMAX_BASE_URL}/chat/completions`, {
         ...fetchOpts,
