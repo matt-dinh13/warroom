@@ -14,6 +14,70 @@ import { tryParseCaptureFromAIResponse, detectFallbackIntent, extractUpdateTarge
 const MEMORY_TTL = 86400; // 24h
 const MAX_MEMORY = 5;
 
+// ─── Direct Task Parser (fallback when AI fails) ─────────
+// Parses "tạo task..." messages directly without AI
+export function tryDirectParse(msg) {
+  const lower = msg.toLowerCase();
+  if (!/tạo|thêm|add|create/.test(lower)) return null;
+
+  const VALID_PROJECTS = ['GMA', 'HOSEL', 'SALES', 'EMPULSE', 'KV', 'EDU', 'TEACH', 'LEARN', 'PERSONAL', 'MATERIALS'];
+  const task = {};
+
+  // Title: after "tên" or "task" keyword
+  const titleMatch = msg.match(/(?:tên|task)\s+(.+?)(?:\n|,|$)/i);
+  if (titleMatch) {
+    task.title = titleMatch[1].trim();
+  } else {
+    // Fallback: first line after "tạo task"
+    const firstLine = msg.split('\n')[0].replace(/^.*?(?:tạo|thêm|add|create)\s*(?:task)?\s*/i, '').trim();
+    if (firstLine) task.title = firstLine;
+  }
+  if (!task.title) return null;
+
+  // Project
+  const projMatch = msg.match(/(?:dự án|project|DA)\s+(\S+)/i);
+  if (projMatch) {
+    const upper = projMatch[1].toUpperCase();
+    task.project = VALID_PROJECTS.includes(upper) ? upper : projMatch[1];
+  }
+
+  // Estimate
+  const estMatch = msg.match(/(\d+)\s*(?:phút|min(?:ute)?s?|p(?!m\b))/i);
+  if (estMatch) task.estimate = parseInt(estMatch[1]);
+
+  // Time (2:30pm, 10am, 14:00...)
+  const timeMatch = msg.match(/(\d{1,2})\s*[:\s]\s*(\d{2})\s*(?:am|pm|sáng|chiều|tối)?/i)
+    || msg.match(/(\d{1,2})\s*(?:am|pm|sáng|chiều|tối)/i);
+  if (timeMatch) {
+    let hour = parseInt(timeMatch[1]);
+    const min = parseInt(timeMatch[2] || '0') || 0;
+    if (/pm|chiều|tối/i.test(msg) && hour < 12) hour += 12;
+    if (/am|sáng/i.test(msg) && hour === 12) hour = 0;
+
+    const now = new Date(Date.now() + 7 * 3600000);
+    const dateStr = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
+    task.scheduled_time = `${dateStr}T${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+    task.due_date = dateStr;
+  }
+
+  // Default due_date
+  if (!task.due_date) {
+    const now = new Date(Date.now() + 7 * 3600000);
+    task.due_date = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
+  }
+
+  // Auto-map source
+  if (task.project) {
+    task.source = PROJECT_SOURCE_MAP[task.project] || 'EIT';
+  }
+
+  // Default urgency/energy
+  task.urgency = task.urgency || '🟡 Important';
+  task.energy = task.energy || '🔋 Med';
+
+  return task;
+}
+
 // ─── Scheduled Time Parser ─────────────────────────────
 // If user mentioned a specific time (10am, 2pm, 14:00, etc.),
 // parse it and set scheduled_time on the task data

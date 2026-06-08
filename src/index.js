@@ -1,7 +1,7 @@
 // Worker entry point — route API requests
 
 import { isAuthenticated, handleLogin, handleLogout } from './auth.js';
-import { processChat } from './triage.js';
+import { processChat, tryDirectParse } from './triage.js';
 import { handleTelegramWebhook, setTelegramWebhook } from './telegram.js';
 import { handleScheduled } from './reminders.js';
 import { backfillDoDate, queryTasks, createTask, updateTaskStatusById, updateTaskSchedule } from './notion.js';
@@ -139,13 +139,41 @@ export default {
           } catch (chatErr) {
             console.error('Chat processing error:', chatErr);
             const isTimeout = chatErr.message?.includes('abort') || chatErr.name === 'AbortError';
-            result = {
-              intent: 'CLARIFY',
-              response_text: isTimeout
-                ? '⏳ AI đang bận hoặc quá tải. Thử lại hoặc dùng lệnh nhanh:\n• `plan` — xem ưu tiên\n• `list` — danh sách task\n• Tạo đơn giản hơn (vd: "tạo task ISPAYEM, HOSEL, 30p")'
-                : `❌ Lỗi xử lý: ${chatErr.message?.substring(0, 100)}. Thử lại nhé.`,
-              needs_confirmation: false,
-            };
+
+            // Fallback: try direct parse for task creation even when AI fails
+            if (isTimeout) {
+              const directTask = tryDirectParse(message);
+              if (directTask) {
+                try {
+                  await createTask(directTask, env);
+                  const { buildCaptureConfirmation } = await import('./responses.js');
+                  result = {
+                    intent: 'CAPTURE',
+                    response_text: buildCaptureConfirmation(directTask),
+                    needs_confirmation: false,
+                  };
+                } catch (createErr) {
+                  console.error('Direct create fallback error:', createErr);
+                  result = {
+                    intent: 'CLARIFY',
+                    response_text: `❌ Tạo task thất bại: ${createErr.message?.substring(0, 80)}`,
+                    needs_confirmation: false,
+                  };
+                }
+              } else {
+                result = {
+                  intent: 'CLARIFY',
+                  response_text: '⏳ AI đang bận hoặc quá tải. Thử lại hoặc dùng lệnh nhanh:\n• `plan` — xem ưu tiên\n• `list` — danh sách task',
+                  needs_confirmation: false,
+                };
+              }
+            } else {
+              result = {
+                intent: 'CLARIFY',
+                response_text: `❌ Lỗi xử lý: ${chatErr.message?.substring(0, 100)}. Thử lại nhé.`,
+                needs_confirmation: false,
+              };
+            }
           }
 
           // Security: sanitize before sending to client
