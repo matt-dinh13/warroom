@@ -519,6 +519,17 @@ function localDateStr(d) {
   return `${y}-${m}-${day}`;
 }
 
+// Helper: get number of days between two YYYY-MM-DD strings safely in UTC
+function getDaysBetween(dateStr1, dateStr2) {
+  const d1 = dateStr1.split(/[T ]/)[0];
+  const d2 = dateStr2.split(/[T ]/)[0];
+  const [y1, m1, dd1] = d1.split('-').map(Number);
+  const [y2, m2, dd2] = d2.split('-').map(Number);
+  const utc1 = Date.UTC(y1, m1 - 1, dd1);
+  const utc2 = Date.UTC(y2, m2 - 1, dd2);
+  return Math.round((utc1 - utc2) / 86400000);
+}
+
 function calInitWeek() {
   const now = new Date();
   const day = now.getDay();
@@ -669,15 +680,19 @@ function renderCalendar() {
   const unscheduled = calTasks.filter(t => !t.scheduled);
 
   scheduled.forEach(task => {
-    // Parse raw ISO string directly (avoid timezone conversion)
-    // Notion returns: "2026-06-08T10:00:00.000+00:00"
-    const dateStr = task.scheduled.split('T')[0];
-    const timePart = task.scheduled.split('T')[1] || '00:00';
-    const hours = parseInt(timePart.split(':')[0]) || 0;
-    const mins = parseInt(timePart.split(':')[1]) || 0;
+    // Parse using Date to handle timezone offsets from Notion correctly
+    const d = new Date(task.scheduled);
+    if (isNaN(d.getTime())) return;
+
+    const localYear = d.getFullYear();
+    const localMonth = String(d.getMonth() + 1).padStart(2, '0');
+    const localDay = String(d.getDate()).padStart(2, '0');
+    const dateStr = `${localYear}-${localMonth}-${localDay}`;
+    const hours = d.getHours();
+    const mins = d.getMinutes();
 
     // Find which day column
-    const dayDiff = Math.round((new Date(dateStr) - new Date(localDateStr(baseDate))) / 86400000);
+    const dayDiff = getDaysBetween(dateStr, localDateStr(baseDate));
     if (dayDiff < 0 || dayDiff >= numDays) return;
 
     const slotIndex = (hours - CAL_START_HOUR) * 2 + Math.floor(mins / 30);
@@ -734,7 +749,7 @@ function updateCalNowLine() {
   const numDays = isDayView ? 1 : 7;
   const baseDate = isDayView ? calSelectedDate : calWeekStart;
   if (!baseDate) return;
-  const dayDiff = Math.round((new Date(today) - new Date(localDateStr(baseDate))) / 86400000);
+  const dayDiff = getDaysBetween(today, localDateStr(baseDate));
   if (dayDiff < 0 || dayDiff >= numDays) return;
 
   const totalMins = (h - CAL_START_HOUR) * 60 + m;
@@ -769,12 +784,19 @@ function openScheduleModal(task) {
   const overlay = $('cal-modal-overlay');
 
   if (task.scheduled) {
-    // Parse raw ISO string (avoid timezone conversion)
-    $('cal-modal-date').value = task.scheduled.split('T')[0];
-    const timePart = task.scheduled.split('T')[1] || '00:00';
-    const h = timePart.split(':')[0].padStart(2, '0');
-    const m = timePart.split(':')[1]?.substring(0, 2).padStart(2, '0') || '00';
-    $('cal-modal-time').value = `${h}:${m}`;
+    const d = new Date(task.scheduled);
+    if (!isNaN(d.getTime())) {
+      const localYear = d.getFullYear();
+      const localMonth = String(d.getMonth() + 1).padStart(2, '0');
+      const localDay = String(d.getDate()).padStart(2, '0');
+      $('cal-modal-date').value = `${localYear}-${localMonth}-${localDay}`;
+      const h = String(d.getHours()).padStart(2, '0');
+      const m = String(d.getMinutes()).padStart(2, '0');
+      $('cal-modal-time').value = `${h}:${m}`;
+    } else {
+      $('cal-modal-date').value = '';
+      $('cal-modal-time').value = '';
+    }
   } else {
     // Default to today + next half-hour
     const now = new Date();

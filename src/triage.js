@@ -273,17 +273,52 @@ export async function processChat(userMessage, env, chatId = 'web') {
           break;
         }
         case 'create_batch': {
-          const tasks = action.data?.tasks || [];
-          for (const t of tasks) {
+          // Use AI's task data array, or fall back to direct parser
+          let batchTasks = [];
+
+          // Try AI's data first
+          if (action.data) {
+            if (Array.isArray(action.data.tasks)) {
+              batchTasks = action.data.tasks;
+            } else if (Array.isArray(action.data)) {
+              batchTasks = action.data;
+            }
+          }
+
+          // Fallback: parse from original message
+          if (batchTasks.length === 0) {
+            const parsed = tryDirectParse(msg);
+            if (parsed) batchTasks = Array.isArray(parsed) ? parsed : [parsed];
+          }
+
+          console.log('create_batch tasks:', batchTasks.length, batchTasks.map(t => t.title + ' / ' + t.due_date));
+
+          for (const t of batchTasks) {
+            // Normalize each task
+            if (t.project) {
+              const upper = t.project.toUpperCase();
+              const validProjects = ['GMA', 'HOSEL', 'SALES', 'EMPULSE', 'KV', 'EDU', 'TEACH', 'LEARN', 'PERSONAL', 'MATERIALS'];
+              if (validProjects.includes(upper)) t.project = upper;
+            }
             if (t.project && !t.source) t.source = PROJECT_SOURCE_MAP[t.project] || 'EIT';
             if (t.project === 'MATERIALS') t.urgency = '⚪ Someday';
+            if (!t.due_date) {
+              const now = new Date(Date.now() + 7 * 3600000);
+              t.due_date = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
+            }
+            if (!t.urgency) t.urgency = '🟡 Important';
+            if (!t.energy) t.energy = '🔋 Med';
+            enrichWithScheduledTime(t, msg);
             await createTask(t, env);
           }
-          notionResult = true;
-          let r = `✅ Đã tạo ${tasks.length} tasks:\n`;
-          tasks.forEach((t, i) => { r += `  ${i + 1}. ${t.urgency || '🟡'} ${t.title} (${t.project || '?'})\n`; });
-          r += `\n💡 Gõ "plan" để xem ưu tiên.`;
-          responseText = r;
+
+          if (batchTasks.length > 0) {
+            notionResult = true;
+            const confirmTexts = batchTasks.map(t => buildCaptureConfirmation(t));
+            responseText = batchTasks.length > 1
+              ? `✅ Đã tạo ${batchTasks.length} tasks:\n\n${confirmTexts.join('\n---\n')}`
+              : confirmTexts[0];
+          }
           break;
         }
         case 'update':
@@ -374,8 +409,10 @@ export async function processChat(userMessage, env, chatId = 'web') {
   }
 
   // ═══ PHASE 3.5: CAPTURE_BATCH fallback (AI returned intent but didn't create) ═══
-  if (!notionResult && /CAPTURE|BATCH/i.test(aiResult.intent || '')) {
+  console.log('Phase 3.5 check:', { notionResult: !!notionResult, intent: aiResult.intent, hasAction: !!action });
+  if (!notionResult && (aiResult.intent === 'CAPTURE_BATCH' || (aiResult.intent === 'CAPTURE' && !action))) {
     const directResult = tryDirectParse(msg);
+    console.log('Phase 3.5 directResult:', directResult);
     if (directResult) {
       try {
         const tasks = Array.isArray(directResult) ? directResult : [directResult];
