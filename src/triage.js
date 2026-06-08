@@ -1,4 +1,4 @@
-// Triage v5.2 — Agentic orchestrator (sarcastic, context-aware)
+// Triage v5.3 — Agentic orchestrator (sarcastic, context-aware)
 // Phase 1: Instant commands (regex, <1s)
 // Phase 2: AI-powered (MiniMax, 5-15s) with task context injection
 // Phase 3: Fallback parsers (when AI returns plain text)

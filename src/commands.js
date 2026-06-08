@@ -1,4 +1,4 @@
-// Instant command matching v5.0 — anchored regex, zero false positives
+// Instant command matching v5.3 — anchored regex, zero false positives
 // Only exact command words match. Natural language goes to AI.
 
 import { queryTasks, updateTaskStatus } from './notion.js';

@@ -715,7 +715,7 @@ function renderCalendar() {
     block.dataset.urgency = task.urgency || '';
     block.dataset.taskId = task.id;
     block.dataset.status = task.status || '';
-    block.innerHTML = `<div class="cal-task-title">${task.title}</div><div class="cal-task-project">${task.project} · ${duration}m</div>`;
+    block.innerHTML = `<div class="cal-task-title">${escapeHtml(task.title)}</div><div class="cal-task-project">${escapeHtml(task.project || '')} · ${duration}m</div>`;
     block.style.gridColumn = col;
     block.style.gridRow = `${rowStart} / span ${slotSpan}`;
     block.addEventListener('click', (e) => {

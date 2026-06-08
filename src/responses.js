@@ -1,4 +1,4 @@
-// Response builders v5.0 — ADHD-optimized, no gamification
+// Response builders v5.3 — ADHD-optimized, no gamification
 // Short, focused, next action clear
 
 // ─── VN Context ─────────────────────────────────────────

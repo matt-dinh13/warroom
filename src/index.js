@@ -197,7 +197,7 @@ export default {
             JSON.stringify({
               status: 'ok',
               timestamp: new Date().toISOString(),
-              version: '5.0.0',
+              version: '5.4.1',
               telegram: !!env.TELEGRAM_BOT_TOKEN,
               cron: true,
             }),

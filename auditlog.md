@@ -4,6 +4,39 @@
 
 ---
 
+## 2026-06-08 — v5.4.1 Code Audit + Fixes
+
+### Scope
+Full codebase audit (all src/ + public/). Findings documented in `AUDIT.md`.
+
+### Fixes Applied
+
+| Severity | Issue | File | Fix |
+|----------|-------|------|-----|
+| 🔴 Critical | `require()` in ESM Worker — crashes capture fallback when task has project | `src/parsers.js` | Replaced with `import { PROJECT_SOURCE_MAP }` at top |
+| 🟡 Medium | XSS via task title in calendar render | `public/app.js` | Wrapped `escapeHtml()` on title + project in calendar block |
+| 🟢 Low | Dead code: unused `tryParseTaskFromUserMessage` (duplicate of `tryDirectParse`) | `src/parsers.js` | Removed |
+| 🟢 Low | Version strings inconsistent (5.0/5.2 mix) | multiple | Synced to 5.4.1 |
+
+### Findings NOT Fixed (documented, low priority)
+- M2: Rate limiter per-isolate (acceptable for single-user)
+- M3: CORS wildcard (mitigated by SameSite=Strict)
+- L1: `done_name` fuzzy match can close wrong task (threshold ≥30 mitigates)
+- L4: `tryDirectParse` still in triage.js (should move to parsers.js)
+- L5: Debug console.logs in production
+- L6: Telegram webhook lacks secret token verification
+
+### Verification
+| Test | Result |
+|------|--------|
+| All modules syntax check | ✅ Pass |
+| health version | ✅ 5.4.1 |
+| plan (instant command) | ✅ TRIAGE, 8 tasks |
+| capture with project (require() fix path) | ✅ Created in Notion, no crash |
+| delete task | ✅ Pass |
+
+---
+
 ## 2026-06-08 — v5.8 Robust scheduled_time Normalization
 
 ### Changes Made

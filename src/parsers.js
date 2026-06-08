@@ -1,5 +1,7 @@
-// Fallback parsers v5.0 — extract task data when AI returns plain text
+// Fallback parsers v5.3 — extract task data when AI returns plain text
 // Used when MiniMax fails to return proper JSON
+
+import { PROJECT_SOURCE_MAP } from './prompts.js';
 
 /**
  * Try to parse task data from AI's plain text response
@@ -54,7 +56,6 @@ export function tryParseCaptureFromAIResponse(aiResponse, userMessage) {
 
   // Source from project
   if (task.project) {
-    const { PROJECT_SOURCE_MAP } = require('./prompts.js');
     task.source = PROJECT_SOURCE_MAP[task.project] || 'EIT';
   }
 
@@ -62,59 +63,6 @@ export function tryParseCaptureFromAIResponse(aiResponse, userMessage) {
   if (/☀️|AM/i.test(aiResponse)) task.block = '☀️ AM';
   else if (/🌤️|PM/i.test(aiResponse)) task.block = '🌤️ PM';
   else if (/🌙|Power Block/i.test(aiResponse)) task.block = '🌙 Power Block';
-
-  return task;
-}
-
-/**
- * Parse task data directly from user message when AI fails completely
- */
-export function tryParseTaskFromUserMessage(msg) {
-  let text = msg.replace(/^(?:tạo\s*(?:task)?|capture|thêm|add|nhờ|giúp|làm)\s*:?\s*/i, '').trim();
-  if (!text || text.length < 3) return null;
-
-  const task = {};
-  const projects = ['GMA', 'HOSEL', 'SALES', 'EMPULSE', 'KV', 'EDU', 'TEACH', 'LEARN', 'PERSONAL', 'MATERIALS'];
-  const sourceMap = { 'GMA': 'EIT', 'HOSEL': 'EIT', 'SALES': 'EIT', 'EMPULSE': 'EIT', 'KV': 'EIT', 'EDU': 'Side Gig', 'TEACH': 'Side Gig', 'LEARN': 'Self', 'PERSONAL': 'Personal', 'MATERIALS': 'Self' };
-
-  // Extract project
-  for (const p of projects) {
-    if (new RegExp(`\\b${p}\\b`, 'i').test(text)) {
-      task.project = p;
-      task.source = sourceMap[p] || 'EIT';
-      text = text.replace(new RegExp(`[,.]?\\s*(?:project|dự án)?\\s*${p}`, 'i'), '').trim();
-      break;
-    }
-  }
-
-  // Extract urgency
-  if (/fire|kh[aẩ]n|g[aấ]p/i.test(text)) { task.urgency = '🔴 Fire'; text = text.replace(/[,.]?\s*(?:urgency\s*)?(?:fire|khẩn|gấp)/i, '').trim(); }
-  else if (/important|quan\s*tr[oọ]ng/i.test(text)) { task.urgency = '🟡 Important'; text = text.replace(/[,.]?\s*(?:urgency\s*)?(?:important|quan trọng)/i, '').trim(); }
-
-  // Extract deadline
-  const dateMatch = text.match(/(?:deadline|hạn|ngày)?\s*(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?/i);
-  if (dateMatch) {
-    const year = dateMatch[3] || '2026';
-    task.due_date = `${year}-${dateMatch[2].padStart(2, '0')}-${dateMatch[1].padStart(2, '0')}`;
-    text = text.replace(/[,.]?\s*(?:deadline|hạn|ngày)?\s*\d{1,2}\/\d{1,2}(?:\/\d{4})?/i, '').trim();
-  }
-
-  // Extract estimate
-  const estMatch = text.match(/(\d+)\s*(?:p|phút|min)/i);
-  if (estMatch) { task.estimate = parseInt(estMatch[1]); text = text.replace(/[,.]?\s*\d+\s*(?:p|phút|min)/i, '').trim(); }
-
-  // Clean remaining text as title
-  text = text.replace(/[,.]?\s*(?:estimate|urgency|project|deadline)\s*/gi, '').replace(/[,.\s]+$/, '').trim();
-  if (!text || text.length < 2) return null;
-
-  task.title = text;
-  if (!task.urgency) task.urgency = '🟡 Important';
-  if (!task.energy) task.energy = '🔋 Med';
-
-  // Auto-set materials
-  if (task.project === 'MATERIALS') {
-    task.urgency = '⚪ Someday';
-  }
 
   return task;
 }
