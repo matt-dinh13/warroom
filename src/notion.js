@@ -80,6 +80,11 @@ export async function createTask(taskData, env) {
   if (taskData.due_date) {
     properties['Deadline'] = { date: { start: taskData.due_date } };
     properties['Do Date'] = { date: { start: taskData.due_date } };
+  } else {
+    // No deadline → set Do Date to today so task appears on board
+    const now = new Date(Date.now() + 7 * 3600000); // VN time
+    const today = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
+    properties['Do Date'] = { date: { start: today } };
   }
 
   // Rich text: assigned_by, context → Notes
