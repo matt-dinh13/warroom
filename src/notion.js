@@ -27,6 +27,18 @@ function notionHeaders(apiKey) {
   };
 }
 
+function formatScheduledTime(t) {
+  if (!t) return null;
+  // If it has a date-time format (contains T) but no offset (+ or - or Z at the end)
+  if (t.includes('T') && !/[+-]\d{2}:\d{2}$|Z$/i.test(t)) {
+    if (t.split('T')[1].split(':').length === 2) {
+      return `${t}:00+07:00`;
+    }
+    return `${t}+07:00`;
+  }
+  return t;
+}
+
 /**
  * Create a new task in the existing "Today" Notion DB
  */
@@ -106,7 +118,7 @@ export async function createTask(taskData, env) {
 
   // Scheduled datetime (for calendar grid)
   if (taskData.scheduled_time) {
-    properties['Scheduled'] = { date: { start: taskData.scheduled_time } };
+    properties['Scheduled'] = { date: { start: formatScheduledTime(taskData.scheduled_time) } };
   }
 
   const response = await fetch(`${NOTION_BASE}/pages`, {
@@ -333,7 +345,7 @@ export async function updateTaskStatusById(pageId, newStatus, env) {
  */
 export async function updateTaskSchedule(pageId, scheduledISO, env) {
   const props = scheduledISO
-    ? { 'Scheduled': { date: { start: scheduledISO } } }
+    ? { 'Scheduled': { date: { start: formatScheduledTime(scheduledISO) } } }
     : { 'Scheduled': { date: null } };
 
   const response = await fetchWithRetry(`${NOTION_BASE}/pages/${pageId}`, {
@@ -550,7 +562,7 @@ export async function editTask(taskTitle, updates, env) {
     };
   }
   if (updates.scheduled_time) {
-    properties['Scheduled'] = { date: { start: updates.scheduled_time } };
+    properties['Scheduled'] = { date: { start: formatScheduledTime(updates.scheduled_time) } };
   }
   if (updates.title || updates.name) {
     const value = updates.title || updates.name;
