@@ -185,9 +185,22 @@ export async function processChat(userMessage, env, chatId = 'web') {
   // Build task context for agentic awareness
   let taskCtx = '';
   try {
-    const [todayTasks, overdueTasks] = await Promise.all([
+    // Calculate week range in VN timezone (+07:00)
+    const nowLocal = new Date(Date.now() + 7 * 3600000);
+    const day = nowLocal.getUTCDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    const monday = new Date(nowLocal);
+    monday.setUTCDate(nowLocal.getUTCDate() + diff);
+    const sunday = new Date(monday);
+    sunday.setUTCDate(monday.getUTCDate() + 6);
+    const pad = n => String(n).padStart(2, '0');
+    const ws = `${monday.getUTCFullYear()}-${pad(monday.getUTCMonth() + 1)}-${pad(monday.getUTCDate())}`;
+    const we = `${sunday.getUTCFullYear()}-${pad(sunday.getUTCMonth() + 1)}-${pad(sunday.getUTCDate())}`;
+
+    const [todayTasks, overdueTasks, weekTasks] = await Promise.all([
       queryTasks('today', env),
       queryTasks('overdue', env),
+      queryTasks('calendar_week', env, { weekStart: ws, weekEnd: we }),
     ]);
     const todayCount = todayTasks?.length || 0;
     const overdueCount = overdueTasks?.length || 0;
@@ -199,7 +212,24 @@ export async function processChat(userMessage, env, chatId = 'web') {
         : '?';
       taskCtx += `\n[🔴 Overdue: "${overdueTasks[0].title}" (quá ${daysSince} ngày)]`;
     }
-  } catch {}
+
+    // Extract scheduled tasks for duplicate prevention grounding
+    const weekdays = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+    const scheduledList = (weekTasks || [])
+      .filter(t => t.scheduled)
+      .map(t => {
+        const vnDate = new Date(new Date(t.scheduled).getTime() + 7 * 3600000);
+        const dayOfWeek = weekdays[vnDate.getUTCDay()];
+        const timeStr = `${String(vnDate.getUTCHours()).padStart(2, '0')}:${String(vnDate.getUTCMinutes()).padStart(2, '0')}`;
+        return `[${dayOfWeek} ${timeStr}] "${t.title}" (${t.project || 'No project'}, ${t.status})`;
+      });
+
+    if (scheduledList.length > 0) {
+      taskCtx += `\n[🗓️ Lịch tuần này:\n${scheduledList.join('\n')}]`;
+    }
+  } catch (err) {
+    console.error('Context injection error:', err);
+  }
 
   const enrichedMessage = `${dateContext}${taskCtx}\n${msg}`;
   const history = await getConversation(chatId, env);

@@ -215,10 +215,11 @@ export default {
               { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
           }
+          const refresh = url.searchParams.get('refresh');
           const [active, doneToday, materials] = await Promise.all([
-            queryTasks('board_all', env),
-            queryTasks('board_done_today', env),
-            queryTasks('materials', env),
+            queryTasks('board_all', env, { refresh }),
+            queryTasks('board_done_today', env, { refresh }),
+            queryTasks('materials', env, { refresh }),
           ]);
           return new Response(
             JSON.stringify({ active, doneToday, materials }),
@@ -303,7 +304,8 @@ export default {
           const ws = `${monday.getUTCFullYear()}-${pad(monday.getUTCMonth() + 1)}-${pad(monday.getUTCDate())}`;
           const we = `${sunday.getUTCFullYear()}-${pad(sunday.getUTCMonth() + 1)}-${pad(sunday.getUTCDate())}`;
 
-          const tasks = await queryTasks('calendar_week', env, { weekStart: ws, weekEnd: we });
+          const refresh = url.searchParams.get('refresh');
+          const tasks = await queryTasks('calendar_week', env, { weekStart: ws, weekEnd: we, refresh });
           return new Response(
             JSON.stringify({ weekStart: ws, weekEnd: we, tasks }),
             { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

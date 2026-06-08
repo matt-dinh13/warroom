@@ -39,6 +39,17 @@ function formatScheduledTime(t) {
   return t;
 }
 
+export async function invalidateCache(env) {
+  if (!env.CHAT_MEMORY) return;
+  try {
+    const newToken = Date.now().toString();
+    await env.CHAT_MEMORY.put('cache:invalidation_token', newToken, { expirationTtl: 86400 });
+    console.log(`Cache invalidated. New token: ${newToken}`);
+  } catch (err) {
+    console.error('Failed to invalidate cache:', err);
+  }
+}
+
 /**
  * Create a new task in the existing "Today" Notion DB
  */
@@ -135,7 +146,9 @@ export async function createTask(taskData, env) {
     throw new Error(`Notion create error ${response.status}: ${err}`);
   }
 
-  return await response.json();
+  const result = await response.json();
+  await invalidateCache(env);
+  return result;
 }
 
 // ─── Retry with backoff (Notion rate limit: 3 req/s) ────
@@ -159,6 +172,24 @@ async function fetchWithRetry(url, options, maxRetries = 2) {
  * @param {object} options - Extra params (e.g. { weekStart, weekEnd } for calendar_week)
  */
 export async function queryTasks(queryType, env, options = {}) {
+  const forceRefresh = options.refresh === true || options.refresh === 'true';
+  let token = '0';
+  let cacheKey = '';
+  if (env.CHAT_MEMORY && !forceRefresh) {
+    try {
+      token = (await env.CHAT_MEMORY.get('cache:invalidation_token')) || '0';
+      cacheKey = `cache:query:${queryType}:${JSON.stringify(options)}:${token}`;
+      const cached = await env.CHAT_MEMORY.get(cacheKey, 'json');
+      if (cached) {
+        console.log(`Cache HIT for ${queryType} with token ${token}`);
+        return cached;
+      }
+      console.log(`Cache MISS for ${queryType} with token ${token}`);
+    } catch (err) {
+      console.error('Cache read error:', err);
+    }
+  }
+
   let filter;
   const today = new Date().toISOString().split('T')[0];
   const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
@@ -316,7 +347,23 @@ export async function queryTasks(queryType, env, options = {}) {
     cursor = data.has_more ? data.next_cursor : undefined;
   } while (cursor);
 
-  return allResults.map(parseNotionTask);
+  const result = allResults.map(parseNotionTask);
+
+  if (env.CHAT_MEMORY) {
+    try {
+      if (forceRefresh) {
+        token = Date.now().toString();
+        await env.CHAT_MEMORY.put('cache:invalidation_token', token, { expirationTtl: 86400 });
+      }
+      const finalCacheKey = `cache:query:${queryType}:${JSON.stringify(options)}:${token}`;
+      await env.CHAT_MEMORY.put(finalCacheKey, JSON.stringify(result), { expirationTtl: 300 }); // 5 minutes TTL
+      console.log(`Cache stored for ${queryType} with token ${token}`);
+    } catch (err) {
+      console.error('Cache write error:', err);
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -339,7 +386,9 @@ export async function updateTaskStatusById(pageId, newStatus, env) {
     }),
   });
 
-  return parseNotionTask(await response.json());
+  const result = parseNotionTask(await response.json());
+  await invalidateCache(env);
+  return result;
 }
 
 /**
@@ -356,7 +405,9 @@ export async function updateTaskSchedule(pageId, scheduledISO, env) {
     body: JSON.stringify({ properties: props }),
   });
 
-  return parseNotionTask(await response.json());
+  const result = parseNotionTask(await response.json());
+  await invalidateCache(env);
+  return result;
 }
 
 // ─── Fuzzy Search ────────────────────────────────────
@@ -492,7 +543,9 @@ export async function updateTaskStatus(taskTitle, newStatus, env) {
     throw new Error(`Notion update error: ${await updateResponse.text()}`);
   }
 
-  return parseNotionTask(await updateResponse.json());
+  const result = parseNotionTask(await updateResponse.json());
+  await invalidateCache(env);
+  return result;
 }
 
 /**
@@ -605,7 +658,9 @@ export async function editTask(taskTitle, updates, env) {
     throw new Error(`Notion edit error: ${await updateResponse.text()}`);
   }
 
-  return parseNotionTask(await updateResponse.json());
+  const result = parseNotionTask(await updateResponse.json());
+  await invalidateCache(env);
+  return result;
 }
 
 /**
@@ -644,7 +699,9 @@ export async function archiveTask(taskTitle, env) {
     throw new Error(`Notion archive error: ${await archiveResponse.text()}`);
   }
 
-  return { id: match.id, title };
+  const result = { id: match.id, title };
+  await invalidateCache(env);
+  return result;
 }
 
 /**
@@ -678,6 +735,9 @@ export async function bulkArchiveTasks(filter, env) {
     archived.push(title);
   }
 
+  if (archived.length > 0) {
+    await invalidateCache(env);
+  }
   return archived;
 }
 
@@ -777,5 +837,8 @@ export async function backfillDoDate(env) {
     updated++;
   }
 
+  if (updated > 0) {
+    await invalidateCache(env);
+  }
   return { total: tasks.length, updated };
 }

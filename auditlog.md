@@ -4,6 +4,34 @@
 
 ---
 
+## 2026-06-08 — v5.7 KV Caching & AI Duplicate Verification Grounding
+
+### Changes Made
+
+#### Notion DB Caching (src/notion.js + src/index.js)
+- Implemented `invalidateCache(env)` to generate a new invalidation token `cache:invalidation_token` in KV whenever any write operation is successfully performed.
+- Called `invalidateCache(env)` in `createTask`, `updateTaskStatusById`, `updateTaskSchedule`, `updateTaskStatus`, `editTask`, `archiveTask`, `bulkArchiveTasks`, and `backfillDoDate`.
+- Updated `queryTasks(queryType, env, options)` to perform a fast lookup against KV key `cache:query:${queryType}:${JSON.stringify(options)}:${token}`.
+- If hit, it returns cached results immediately. If miss, it queries Notion API, caches the results with a 5-minute TTL, and returns.
+- Passed `refresh` parameter from `/api/tasks` and `/api/calendar` query parameters to bypass cache and force a new invalidation token, allowing direct Notion re-syncs.
+
+#### Client Refreshes (public/app.js)
+- Updated manual `cal-refresh` and `btn-refresh-board` click event listeners to append `refresh=true` to query params, forcing cache bypass and reloading direct data from Notion.
+
+#### AI Grounding Context (src/triage.js)
+- Calculated current week range and queried `calendar_week` (using cached query tasks).
+- Parsed and extracted all scheduled task titles, dates, projects, and statuses.
+- Formatted and appended the list `[🗓️ Lịch tuần này: ...]` into the AI's prompt workload context block.
+- This grounds the AI in the actual database schedule, preventing duplicate task alerts or false-positive completion confirmations.
+
+### Technical Decisions
+
+#### D1: Single invalidation token vs bulk key deletion
+- **Decision:** Use a single invalidation token `cache:invalidation_token` appended to cache keys, rather than searching and deleting multiple KV query keys.
+- **Reasoning:** Cloudflare KV does not support prefix-based atomic deletion. By simply changing the token, all previous caches are instantly invalidated in one write, saving CPU time and avoiding read-after-write inconsistencies.
+
+---
+
 ## 2026-06-08 — v5.6 MiniMax API Timeout Increase
 
 ### Changes Made

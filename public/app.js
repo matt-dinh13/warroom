@@ -319,7 +319,7 @@ async function fetchBoard(showSpinner = false) {
   if (showSpinner) { boardLoading.hidden = false; }
 
   try {
-    const res = await fetch(`${API}/tasks`);
+    const res = await fetch(`${API}/tasks${showSpinner ? '?refresh=true' : ''}`);
     if (!res.ok) throw new Error('Failed to fetch');
     boardData = await res.json();
     renderBoard();
@@ -579,13 +579,13 @@ function calSetViewMode(mode) {
   fetchCalendar(); // re-fetch + re-render
 }
 
-async function fetchCalendar() {
+async function fetchCalendar(forceRefresh = false) {
   const loading = $('cal-loading');
   if (loading) loading.hidden = false;
   if (!calWeekStart) calInitWeek();
   const ws = localDateStr(calWeekStart);
   try {
-    const res = await fetch(`${API}/calendar?week=${ws}`);
+    const res = await fetch(`${API}/calendar?week=${ws}${forceRefresh ? '&refresh=true' : ''}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     calTasks = data.tasks || [];
@@ -868,7 +868,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('cal-prev')?.addEventListener('click', () => calShiftNav(-1));
   $('cal-next')?.addEventListener('click', () => calShiftNav(1));
   $('cal-today')?.addEventListener('click', calGoToday);
-  $('cal-refresh')?.addEventListener('click', () => fetchCalendar());
+  $('cal-refresh')?.addEventListener('click', () => fetchCalendar(true));
   $('cal-view-day')?.addEventListener('click', () => calSetViewMode('day'));
   $('cal-view-week')?.addEventListener('click', () => calSetViewMode('week'));
   $('cal-modal-close')?.addEventListener('click', closeScheduleModal);
