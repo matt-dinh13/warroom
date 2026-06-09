@@ -4,6 +4,49 @@
 
 ---
 
+## 2026-06-08 — v5.8 Analytics v2 (Behavioral Tracking)
+
+### Scope
+Mở rộng tracking từ "cái gì xảy ra" sang "khi nào + pattern hành vi" — dữ liệu dẫn tới hành động cải thiện app, đặc biệt cho ADHD workflow.
+
+### Metrics mới
+
+| Metric | Đo gì | Cải thiện app thế nào |
+|--------|-------|----------------------|
+| `hourly_capture` / `hourly_complete` | Hoạt động theo giờ VN | Tìm productive window THẬT → chỉnh cron reminder theo hành vi, không theo giả định hardcode |
+| `is_weekday` / `is_weekend` | Split T2-T6 vs T7-CN | Validate giả định "weekend = 120p capacity" |
+| Per-task defer count (`defercount:{id}`) | Task bị auto-defer mấy lần | Phát hiện guilt loop → feed resurfacing feature |
+| `getChronicDefers(≥3)` | Task né 3+ lần | "stats" cảnh báo "task này né 4 lần, drop hay chia nhỏ?" |
+
+### Changes
+| File | Change |
+|------|--------|
+| `analytics.js` | +hourly buckets, +weekday/weekend, +bumpDeferCount/clearDeferCount/getChronicDefers (per-task KV, 30d TTL), +buildDeferReport, +getHourKey/isWeekendVN |
+| `triage.js` | Record hourly_capture/complete + weekday/weekend ở instant + AI paths |
+| `reminders.js` | Auto-defer bump defer count per task |
+| `commands.js` | "stats" gồm chronic-defer report. done_num/done_name clear defer count |
+| `index.js` | /api/analytics trả thêm chronic_defers. Board complete clear defer count |
+
+### Design
+- Fire-and-forget, không block, không throw
+- Per-task defer count: KV key riêng `defercount:{pageId}`, 30d TTL (task không touch 30d coi như done/dropped)
+- Clear defer count khi task Completed (mọi đường: done N, done name, board)
+- Self-tracking single-user — data trong KV của chính user, không gửi đi đâu
+
+### Verification
+| Test | Result |
+|------|--------|
+| plan/capture → hourly + weekday recorded | ✅ hourly_capture {11:1}, is_weekday:3 |
+| stats hiện behavioral metrics | ✅ weekday/weekend split, top hours |
+| /api/analytics trả chronic_defers | ✅ [] (chưa có defer) |
+| defer count clear on complete | ✅ logic in place (done/board) |
+| All modules syntax | ✅ |
+
+### Lưu ý
+Defer tracking chỉ tích lũy data khi cron 23:30 chạy thật trên production (local dev không auto-trigger). Sau vài ngày dùng thật → chronic defers sẽ lộ ra trong "stats".
+
+---
+
 ## 2026-06-08 — v5.7 Schema Cleanup (bỏ ghost fields)
 
 ### Scope

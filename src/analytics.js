@@ -31,7 +31,23 @@ function emptyDay() {
     edits: 0,
     defers: 0,                // auto-defer cron moved tasks to tomorrow
     errors: 0,                // exceptions caught
+    hourly_capture: {},       // { "9": 3, "14": 2 } — captures by VN hour
+    hourly_complete: {},      // { "10": 1 } — completions by VN hour
+    is_weekend: 0,            // count of weekend interactions
+    is_weekday: 0,            // count of weekday interactions
   };
+}
+
+/** Current VN hour as string key */
+export function getHourKey() {
+  const d = new Date(Date.now() + 7 * 3600000);
+  return String(d.getUTCHours());
+}
+
+/** Is current VN day a weekend */
+export function isWeekendVN() {
+  const day = new Date(Date.now() + 7 * 3600000).getUTCDay();
+  return day === 0 || day === 6;
 }
 
 /** Deep-merge a delta into a daily record (additive for numbers, nested counters) */
@@ -113,6 +129,43 @@ function sumObj(obj) {
   return Object.values(obj).reduce((s, v) => s + (typeof v === 'number' ? v : 0), 0);
 }
 
+// ─── Per-task defer tracking (guilt-loop detection) ──────────
+// Keyed by Notion page id. Counts how many times a task was auto-deferred.
+const DEFER_PREFIX = 'defercount:';
+
+export async function bumpDeferCount(env, taskId, taskTitle) {
+  if (!env.CHAT_MEMORY || !taskId) return 0;
+  try {
+    const key = `${DEFER_PREFIX}${taskId}`;
+    const existing = (await env.CHAT_MEMORY.get(key, 'json')) || { title: taskTitle, count: 0 };
+    existing.count++;
+    existing.title = taskTitle || existing.title;
+    existing.last = getDateKey();
+    // Keep 30 days — if a task isn't touched in 30d it's likely done/dropped
+    await env.CHAT_MEMORY.put(key, JSON.stringify(existing), { expirationTtl: 30 * 86400 });
+    return existing.count;
+  } catch { return 0; }
+}
+
+export async function clearDeferCount(env, taskId) {
+  if (!env.CHAT_MEMORY || !taskId) return;
+  try { await env.CHAT_MEMORY.delete(`${DEFER_PREFIX}${taskId}`); } catch {}
+}
+
+/** List tasks deferred >= threshold times (guilt-loop candidates) */
+export async function getChronicDefers(env, threshold = 3) {
+  if (!env.CHAT_MEMORY) return [];
+  try {
+    const list = await env.CHAT_MEMORY.list({ prefix: DEFER_PREFIX });
+    const out = [];
+    for (const k of list.keys) {
+      const rec = await env.CHAT_MEMORY.get(k.name, 'json');
+      if (rec && rec.count >= threshold) out.push(rec);
+    }
+    return out.sort((a, b) => b.count - a.count);
+  } catch { return []; }
+}
+
 /**
  * Build a human-readable stats summary (for chat "stats" command + Telegram)
  */
@@ -147,5 +200,33 @@ export function buildStatsReport(summary) {
     srcs.forEach(([k, v]) => { r += `• ${k}: ${v}\n`; });
   }
 
+  // Hourly activity — find productive window
+  const hourly = {};
+  for (const [h, c] of Object.entries(totals.hourly_capture || {})) hourly[h] = (hourly[h] || 0) + c;
+  for (const [h, c] of Object.entries(totals.hourly_complete || {})) hourly[h] = (hourly[h] || 0) + c;
+  const topHours = Object.entries(hourly).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  if (topHours.length) {
+    r += `\n⏰ Giờ active nhất:\n`;
+    topHours.forEach(([h, c]) => { r += `• ${String(h).padStart(2, '0')}:00 — ${c} hoạt động\n`; });
+  }
+
+  // Weekday vs weekend
+  if (totals.is_weekday || totals.is_weekend) {
+    r += `\n📅 Weekday: ${totals.is_weekday || 0} · Weekend: ${totals.is_weekend || 0}\n`;
+  }
+
   return r.trim();
+}
+
+/**
+ * Append chronic-defer warning to a report (call separately — needs async KV scan)
+ */
+export function buildDeferReport(chronicDefers) {
+  if (!chronicDefers || !chronicDefers.length) return '';
+  let r = `\n\n🔁 Task né nhiều lần (guilt loop):\n`;
+  chronicDefers.slice(0, 5).forEach(d => {
+    r += `• "${d.title}" — defer ${d.count} lần\n`;
+  });
+  r += `💡 Cân nhắc drop hoặc chia nhỏ.`;
+  return r;
 }

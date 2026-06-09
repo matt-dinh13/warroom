@@ -5,7 +5,7 @@ import { processChat, tryDirectParse } from './triage.js';
 import { handleTelegramWebhook, setTelegramWebhook } from './telegram.js';
 import { handleScheduled } from './reminders.js';
 import { backfillDoDate, queryTasks, createTask, updateTaskStatusById, updateTaskSchedule } from './notion.js';
-import { recordDelta, getSummary, buildStatsReport } from './analytics.js';
+import { recordDelta, getSummary, buildStatsReport, getChronicDefers, clearDeferCount } from './analytics.js';
 
 // ─── Security: Never leak secrets in any response ───────────
 const SECRET_KEYS = ['MINIMAX_API_KEY', 'NOTION_API_KEY', 'NOTION_TASKS_DB_ID', 'NOTION_DAILY_DB_ID', 'APP_PASSWORD', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'];
@@ -198,7 +198,7 @@ export default {
             JSON.stringify({
               status: 'ok',
               timestamp: new Date().toISOString(),
-              version: '5.7.0',
+              version: '5.8.0',
               telegram: !!env.TELEGRAM_BOT_TOKEN,
               cron: true,
             }),
@@ -277,6 +277,7 @@ export default {
           const result = await updateTaskStatusById(body.id, body.status, env);
           if (body.status === 'Completed') {
             await recordDelta(env, { completions: { board: 1 } });
+            await clearDeferCount(env, body.id);
           }
           return new Response(
             JSON.stringify({ success: true, task: result }),
@@ -348,8 +349,9 @@ export default {
           }
           const days = Math.min(parseInt(url.searchParams.get('days') || '7'), 90);
           const summary = await getSummary(env, days);
+          const chronicDefers = await getChronicDefers(env, 3);
           return new Response(
-            JSON.stringify(summary || { error: 'No data' }),
+            JSON.stringify({ ...(summary || {}), chronic_defers: chronicDefers }),
             { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }

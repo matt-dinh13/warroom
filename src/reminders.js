@@ -2,7 +2,7 @@
 // Smart: shorter messages, skip when no tasks, no gamification
 import { queryTasks } from './notion.js';
 import { sendTelegramMessage } from './telegram.js';
-import { recordDelta } from './analytics.js';
+import { recordDelta, bumpDeferCount } from './analytics.js';
 
 /**
  * Handle scheduled (cron) event
@@ -143,6 +143,7 @@ async function sendAutoDeferSummary(env) {
           body: JSON.stringify({ properties: { 'Do Date': { date: { start: tomorrow } } } }),
         });
         deferred++;
+        await bumpDeferCount(env, task.id, task.title);
       } catch {}
     }
   }

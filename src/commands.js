@@ -2,7 +2,7 @@
 // Only exact command words match. Natural language goes to AI.
 
 import { queryTasks, updateTaskStatus } from './notion.js';
-import { getSummary, buildStatsReport } from './analytics.js';
+import { getSummary, buildStatsReport, buildDeferReport, getChronicDefers, clearDeferCount } from './analytics.js';
 import {
   buildTriageResponse, buildOverdueResponse, buildLoadCheckResponse,
   buildListResponse, buildReportResponse, buildBacklogResponse,
@@ -79,7 +79,8 @@ export async function executeInstantCommand(cmd, env, chatId, getLastPlan, saveL
     }
     case 'stats': {
       const summary = await getSummary(env, 7);
-      return buildResult('STATS', buildStatsReport(summary));
+      const chronic = await getChronicDefers(env, 3);
+      return buildResult('STATS', buildStatsReport(summary) + buildDeferReport(chronic));
     }
     case 'done_num': {
       const idx = parseInt(cmd.match[1]) - 1;
@@ -88,6 +89,7 @@ export async function executeInstantCommand(cmd, env, chatId, getLastPlan, saveL
       if (idx < 0 || idx >= lastPlan.length) return buildResult('UPDATE', `❌ Chỉ có ${lastPlan.length} tasks. Gõ "done 1" đến "done ${lastPlan.length}".`);
       const result = await updateTaskStatus(lastPlan[idx].title, 'Completed', env);
       if (!result) return buildResult('UPDATE', `❌ Không tìm thấy "${lastPlan[idx].title}".`);
+      if (result.id) await clearDeferCount(env, result.id);
       const remaining = await queryTasks('today', env);
       return buildResult('UPDATE', buildCompletionResponse(result, remaining.length, remaining));
     }
@@ -95,6 +97,7 @@ export async function executeInstantCommand(cmd, env, chatId, getLastPlan, saveL
       const taskName = cmd.match[1].trim();
       const result = await updateTaskStatus(taskName, 'Completed', env);
       if (!result) return buildResult('UPDATE', `❌ Không tìm thấy "${taskName}".`);
+      if (result.id) await clearDeferCount(env, result.id);
       const remaining = await queryTasks('today', env);
       return buildResult('UPDATE', buildCompletionResponse(result, remaining.length, remaining));
     }

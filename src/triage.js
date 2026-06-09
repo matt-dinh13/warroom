@@ -9,7 +9,7 @@ import { SYSTEM_PROMPT, PROJECT_SOURCE_MAP } from './prompts.js';
 import { matchInstantCommand, executeInstantCommand } from './commands.js';
 import { getVNContext, buildCaptureConfirmation, buildCompletionResponse } from './responses.js';
 import { tryParseCaptureFromAIResponse, detectFallbackIntent, extractUpdateTarget } from './parsers.js';
-import { recordDelta } from './analytics.js';
+import { recordDelta, getHourKey, isWeekendVN } from './analytics.js';
 
 // ─── Conversation Memory ─────────────────────────────
 const MEMORY_TTL = 86400; // 24h
@@ -180,9 +180,16 @@ export async function processChat(userMessage, env, chatId = 'web') {
     const result = await executeInstantCommand(cmd, env, chatId, getLastPlan, saveLastPlan);
     if (result) {
       // Analytics: instant command (no AI)
-      const d = { interactions: 1, instant_commands: 1, sources: { [source]: 1 }, intents: { [result.intent]: 1 } };
+      const hk = getHourKey();
+      const wknd = isWeekendVN();
+      const d = {
+        interactions: 1, instant_commands: 1,
+        sources: { [source]: 1 }, intents: { [result.intent]: 1 },
+        is_weekend: wknd ? 1 : 0, is_weekday: wknd ? 0 : 1,
+      };
       if (cmd.type === 'done_num' || cmd.type === 'done_name') {
         d.completions = { [cmd.type]: 1 };
+        d.hourly_complete = { [hk]: 1 };
       }
       await recordDelta(env, d);
       return result;
@@ -255,11 +262,14 @@ export async function processChat(userMessage, env, chatId = 'web') {
   const updatedHistory = [...history, { role: 'user', content: enrichedMessage }];
 
   // Analytics delta accumulator (flushed before each return below)
+  const wknd = isWeekendVN();
   const analytics = {
     interactions: 1,
     sources: { [source]: 1 },
     ai_calls: 1,
     ai_latency_ms: aiLatency,
+    is_weekend: wknd ? 1 : 0,
+    is_weekday: wknd ? 0 : 1,
   };
 
   let notionResult = null;
@@ -524,10 +534,12 @@ export async function processChat(userMessage, env, chatId = 'web') {
       const captureSource = action ? `chat_${source}` : 'direct_parse';
       const count = (finalIntent === 'CAPTURE_BATCH' && typeof notionResult === 'number') ? notionResult : 1;
       analytics.captures = { [captureSource]: count };
+      analytics.hourly_capture = { [getHourKey()]: count };
     }
     // Completion tracking (natural language done via AI/fallback)
     if (finalIntent === 'UPDATE' && notionResult) {
       analytics.completions = { natural: 1 };
+      analytics.hourly_complete = { [getHourKey()]: 1 };
     }
     if (finalIntent === 'EDIT' && notionResult) analytics.edits = 1;
     if (finalIntent === 'DELETE' && notionResult) analytics.deletes = 1;

@@ -261,6 +261,7 @@ TELEGRAM_CHAT_ID    — Matt's Telegram chat ID
 | **5.5** | **2026-06-08** | **Analytics — usage tracking (captures/completions/AI health/intents), /api/analytics endpoint, "stats" command** |
 | **5.6** | **2026-06-08** | **Reliability (Sprint 2): Notion write retry (429-safe), per-query cache invalidation, pin task (Power Block/In progress skip auto-defer)** |
 | **5.7** | **2026-06-08** | **Schema cleanup — bỏ Priority (trùng Urgency) + Energy (ghost field) khỏi code & prompt. Confirmation gọn hơn** |
+| **5.8** | **2026-06-08** | **Analytics v2 (behavioral): hourly heatmap, weekday/weekend split, per-task defer tracking (guilt-loop detection), chronic-defer report trong "stats"** |
 | **5.5** | **2026-06-08** | **Default calendar to week view, Completed tasks visible on timeline, 24h toggle checkbox** |
 | **5.6** | **2026-06-08** | **Increase MiniMax API timeout to 60 seconds** |
 | **5.7** | **2026-06-08** | **Notion task caching in Cloudflare KV & AI duplicate verification grounding** |
