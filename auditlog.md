@@ -4,6 +4,41 @@
 
 ---
 
+## 2026-06-08 — v5.7 Schema Cleanup (bỏ ghost fields)
+
+### Scope
+Đánh giá Notion DB phát hiện trường thừa. Bỏ `Priority` + `Energy` khỏi code & prompt.
+
+### Phân tích
+DB có 17 properties. Audit phát hiện:
+- **`Priority`**: code auto-map từ Urgency (🔴→High,...) rồi ghi vào, nhưng KHÔNG dùng để filter/sort/quyết định gì. Trùng lặp 100% với Urgency.
+- **`Energy`** (⚡🔋😴): AI set mặc định 🔋 Med, hiển thị trong confirmation, nhưng KHÔNG có logic nào dùng. Ghost field — thiết kế cho hệ thống lập lịch theo năng lượng chưa bao giờ build.
+
+### Changes
+| File | Change |
+|------|--------|
+| `notion.js` | Bỏ ghi `Priority` (+ priorityMap) và `Energy` trong createTask/editTask. Bỏ parse trong parseNotionTask |
+| `prompts.js` | Bỏ `energy` khỏi 6 few-shot examples + NOTION FIELDS section |
+| `triage.js` | Bỏ default `energy: '🔋 Med'` (2 chỗ) |
+| `parsers.js` | Bỏ energy parsing. Sửa estimate regex nhận `⏱️ 45p` (có variation selector) |
+| `responses.js` | Bỏ energy khỏi buildCaptureConfirmation |
+| `index.js` | Bỏ energy khỏi board quick-add |
+
+### Quyết định
+- **Không xóa cột Notion**, chỉ ngừng ghi. Data cũ giữ nguyên, an toàn rollback. User tự xóa tay nếu muốn.
+- `Parent item`/`Sub-item` (relation): code không đụng → để nguyên, không sửa.
+- `Assigned By`/`Notes`: giữ (metadata hiển thị hữu ích, chi phí thấp).
+
+### Verification
+| Test | Result |
+|------|--------|
+| Create task | ✅ Notion: Priority=null, Energy=null, Urgency=set |
+| Confirmation gọn hơn (không còn "🔋 Med") | ✅ |
+| No energy/priority refs left in src | ✅ grep clean |
+| All modules syntax | ✅ |
+
+---
+
 ## 2026-06-08 — v5.6 Reliability (Sprint 2)
 
 ### Scope

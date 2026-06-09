@@ -198,7 +198,7 @@ export default {
             JSON.stringify({
               status: 'ok',
               timestamp: new Date().toISOString(),
-              version: '5.6.0',
+              version: '5.7.0',
               telegram: !!env.TELEGRAM_BOT_TOKEN,
               cron: true,
             }),
@@ -247,7 +247,6 @@ export default {
             title: body.title.trim(),
             project: body.project || 'PERSONAL',
             urgency: body.project === 'MATERIALS' ? '⚪ Someday' : (body.urgency || '🟡 Important'),
-            energy: '🔋 Med',
             source: body.source || 'EIT',
           };
           if (body.deadline) taskData.due_date = body.deadline;

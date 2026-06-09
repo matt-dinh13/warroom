@@ -101,13 +101,13 @@ Database **"Today"** (`1a65fcb4-61d1-814c-9f08-e65b9e28af64`).
 |-------------|------|------------------|-------|
 | `Name` | title | Task title | — |
 | `Context` | select | Project | GMA, HOSEL, SALES, EMPULSE, KV, EDU, TEACH, LEARN, PERSONAL, Life, EIT, Gigs, MATERIALS |
-| `Priority` | select | Priority | High/Medium/Low |
 | `Urgency` | select | Urgency level | 🔴 Fire, 🟡 Important, 🟢 Wait, ⚪ Someday |
-| `Energy` | select | Energy required | ⚡ High, 🔋 Med, 😴 Low |
 | `State` | status | Status | To do, In progress, Pending / Wait for approved, Completed |
 | `Deadline` | date | Due date | — |
 | `Do Date` | date | Planned do date | — |
 | `Scheduled` | date | Scheduled datetime | With time (e.g. 2026-06-09T09:00) |
+
+> **v5.7:** `Priority` (trùng Urgency) và `Energy` (không dùng trong logic) đã bị bỏ khỏi code. Cột Notion còn tồn tại nhưng không còn được ghi — có thể xóa tay nếu muốn.
 | `Estimate` | number | Minutes estimate | — |
 | `Block` | select | Time block | ☀️ AM, 🌤️ PM, 🌙 Power Block |
 | `Source` | select | Source | EIT, Side Gig, Self, Personal |
@@ -258,6 +258,7 @@ TELEGRAM_CHAT_ID    — Matt's Telegram chat ID
 | **5.4.2** | **2026-06-08** | **Audit hardening — Telegram webhook secret, done_name guard (≤6 words), removed debug logs** |
 | **5.5** | **2026-06-08** | **Analytics — usage tracking (captures/completions/AI health/intents), /api/analytics endpoint, "stats" command** |
 | **5.6** | **2026-06-08** | **Reliability (Sprint 2): Notion write retry (429-safe), per-query cache invalidation, pin task (Power Block/In progress skip auto-defer)** |
+| **5.7** | **2026-06-08** | **Schema cleanup — bỏ Priority (trùng Urgency) + Energy (ghost field) khỏi code & prompt. Confirmation gọn hơn** |
 | **5.5** | **2026-06-08** | **Default calendar to week view, Completed tasks visible on timeline, 24h toggle checkbox** |
 | **5.6** | **2026-06-08** | **Increase MiniMax API timeout to 60 seconds** |
 | **5.7** | **2026-06-08** | **Notion task caching in Cloudflare KV & AI duplicate verification grounding** |

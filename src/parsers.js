@@ -29,13 +29,8 @@ export function tryParseCaptureFromAIResponse(aiResponse, userMessage) {
   else if (/🟢|Wait/i.test(aiResponse)) task.urgency = '🟢 Wait';
   else if (/⚪|Someday/i.test(aiResponse)) task.urgency = '⚪ Someday';
 
-  // Energy
-  if (/⚡|High/i.test(aiResponse)) task.energy = '⚡ High';
-  else if (/🔋|Med/i.test(aiResponse)) task.energy = '🔋 Med';
-  else if (/😴|Low/i.test(aiResponse)) task.energy = '😴 Low';
-
   // Estimate
-  const estMatch = aiResponse.match(/⏱\s*(\d+)p/);
+  const estMatch = aiResponse.match(/⏱[️\ufe0f]?\s*(\d+)\s*p/);
   if (estMatch) task.estimate = parseInt(estMatch[1]);
 
   // Deadline

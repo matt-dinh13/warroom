@@ -105,7 +105,6 @@ export function buildCaptureConfirmation(d) {
   let r = `✅ Đã tạo task:\n📌 ${d.title || 'Untitled'}`;
   if (d.project) r += `\n📂 ${d.project}`;
   if (d.urgency) r += ` | ${d.urgency}`;
-  if (d.energy) r += ` | ${d.energy}`;
   if (d.estimate) r += `\n⏱ ${d.estimate}p`;
   if (d.due_date) r += ` | 📅 ${d.due_date}`;
   if (d.scheduled_time) {

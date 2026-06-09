@@ -3,9 +3,7 @@
 // Property mapping (DB "Today" → Stratt concept):
 //   Name (title)       → Task title
 //   Context (select)   → Project (GMA, HOSEL, SALES, etc.)
-//   Priority (select)  → Priority (High/Medium/Low)
 //   Urgency (select)   → Urgency (🔴 Fire, 🟡 Important, etc.)
-//   Energy (select)    → Energy (⚡ High, 🔋 Med, 😴 Low)
 //   State (status)     → Status (To do, In progress, Completed)
 //   Deadline (date)    → Due date
 //   Do Date (date)     → Planned do date
@@ -118,28 +116,11 @@ export async function createTask(taskData, env) {
   if (taskData.urgency) {
     properties['Urgency'] = { select: { name: taskData.urgency } };
   }
-  if (taskData.energy) {
-    properties['Energy'] = { select: { name: taskData.energy } };
-  }
   if (taskData.block) {
     properties['Block'] = { select: { name: taskData.block } };
   }
   if (taskData.source) {
     properties['Source'] = { select: { name: taskData.source } };
-  }
-
-  // Map AI priority to existing Priority values
-  if (taskData.urgency) {
-    const priorityMap = {
-      '🔴 Fire': 'High Priority',
-      '🟡 Important': 'Medium Priority',
-      '🟢 Wait': 'Low Priority',
-      '⚪ Someday': 'Low Priority',
-    };
-    const mapped = priorityMap[taskData.urgency];
-    if (mapped) {
-      properties['Priority'] = { select: { name: mapped } };
-    }
   }
 
   // Status — default to "To do"
@@ -645,9 +626,6 @@ export async function editTask(taskTitle, updates, env) {
   if (updates.project) {
     properties['Context'] = { select: { name: updates.project } };
   }
-  if (updates.energy) {
-    properties['Energy'] = { select: { name: updates.energy } };
-  }
   if (updates.block) {
     properties['Block'] = { select: { name: updates.block } };
   }
@@ -681,9 +659,6 @@ export async function editTask(taskTitle, updates, env) {
   if (updates.resource || updates.link || updates.url) {
     const value = updates.resource || updates.link || updates.url;
     properties['Resource'] = { url: value };
-  }
-  if (updates.priority) {
-    properties['Priority'] = { select: { name: updates.priority } };
   }
   if (updates.status) {
     const statusMap = {
@@ -821,8 +796,6 @@ function parseNotionTask(page) {
     title: p?.Name?.title?.[0]?.text?.content || 'Untitled',
     project: p?.Context?.select?.name || '',
     urgency: p?.Urgency?.select?.name || '',
-    energy: p?.Energy?.select?.name || '',
-    priority: p?.Priority?.select?.name || '',
     status: p?.State?.status?.name || '',
     estimate: p?.Estimate?.number || 0,
     due_date: p?.Deadline?.date?.start || '',

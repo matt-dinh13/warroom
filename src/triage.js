@@ -82,7 +82,6 @@ export function tryDirectParse(msg) {
     const task = {
       title,
       urgency: '🟡 Important',
-      energy: '🔋 Med',
     };
     if (project) {
       task.project = project;
@@ -356,7 +355,6 @@ export async function processChat(userMessage, env, chatId = 'web') {
               t.due_date = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
             }
             if (!t.urgency) t.urgency = '🟡 Important';
-            if (!t.energy) t.energy = '🔋 Med';
             enrichWithScheduledTime(t, msg);
             await createTask(t, env);
           }
