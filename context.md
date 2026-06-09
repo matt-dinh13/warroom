@@ -107,7 +107,9 @@ Database **"Today"** (`1a65fcb4-61d1-814c-9f08-e65b9e28af64`).
 | `Do Date` | date | Planned do date | — |
 | `Scheduled` | date | Scheduled datetime | With time (e.g. 2026-06-09T09:00) |
 
-> **v5.7:** `Priority` (trùng Urgency) và `Energy` (không dùng trong logic) đã bị bỏ khỏi code. Cột Notion còn tồn tại nhưng không còn được ghi — có thể xóa tay nếu muốn.
+> **v5.7:** `Priority` (trùng Urgency) và `Energy` (không dùng trong logic) đã bị bỏ khỏi code. Cột Notion còn tồn tại nhưng không còn được ghi.
+> - `Priority`: đã overwrite toàn bộ 92 task → marker "🗑️ XÓA CỘT NÀY". **Chờ user xóa cột trong Notion.**
+> - `Energy`: giữ nguyên cột + 27 giá trị có chủ đích (dành cho Sprint 3 nếu làm energy-based scheduling).
 | `Estimate` | number | Minutes estimate | — |
 | `Block` | select | Time block | ☀️ AM, 🌤️ PM, 🌙 Power Block |
 | `Source` | select | Source | EIT, Side Gig, Self, Personal |

@@ -37,6 +37,13 @@ DB có 17 properties. Audit phát hiện:
 | No energy/priority refs left in src | ✅ grep clean |
 | All modules syntax | ✅ |
 
+### Migration: mark Priority column for deletion
+- Chạy script one-off overwrite toàn bộ 92 task: `Priority` → `🗑️ XÓA CỘT NÀY` (marker trực quan để user biết xóa cột nào trong Notion).
+- Script đã xóa sau khi chạy (one-off, không commit vào repo).
+- **Energy KHÔNG đụng tới** — giữ 27 giá trị có chủ đích (11 ⚡High, 15 🔋Med, 1 😴Low) cho Sprint 3 (energy-based scheduling nếu làm).
+- `Priority` là phái sinh 100% từ Urgency → không cần merge data, bỏ thẳng an toàn.
+- **Action chờ user:** xóa cột Priority trong Notion (toàn bộ đã là marker).
+
 ---
 
 ## 2026-06-08 — v5.6 Reliability (Sprint 2)
