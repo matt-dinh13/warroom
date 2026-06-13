@@ -2,7 +2,7 @@
 // Smart: shorter messages, skip when no tasks, no gamification
 import { queryTasks } from './notion.js';
 import { sendTelegramMessage } from './telegram.js';
-import { recordDelta, bumpDeferCount } from './analytics.js';
+import { recordDelta, bumpDeferCount, getChronicDefers } from './analytics.js';
 
 /**
  * Handle scheduled (cron) event
@@ -21,6 +21,9 @@ export async function handleScheduled(event, env) {
     if (!isWeekend) {
       if (vnHour === 8 && vnMin === 0) {
         await sendMorningBriefing(env);
+        if (vnDay === 1) {
+          await sendParkedDigest(env);
+        }
       } else if (vnHour === 10 && vnMin === 30) {
         await sendDriftCheck(env);
       } else if (vnHour === 13 && vnMin === 30) {
@@ -127,10 +130,57 @@ async function sendAutoDeferSummary(env) {
     t.block !== '🌙 Power Block'
   );
 
+  // Get chronic defers list to separate them
+  const chronicList = await getChronicDefers(env, 3);
+  const chronicMap = new Map(chronicList.map(c => [c.id, c.count]));
+
+  const chronicRemaining = remaining.filter(t => chronicMap.has(t.id));
+  const normalRemaining = remaining.filter(t => !chronicMap.has(t.id));
+
   // Auto-defer remaining tasks to tomorrow (skip pinned)
   const tomorrow = new Date(Date.now() + 7 * 60 * 60 * 1000 + 86400000).toISOString().split('T')[0];
   let deferred = 0;
-  for (const task of remaining) {
+
+  // Defer normal tasks silently
+  for (const task of normalRemaining) {
+    if (task.id && task.due_date) {
+      try {
+        await fetch(`https://api.notion.com/v1/pages/${task.id}`, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${env.NOTION_API_KEY}`,
+            'Notion-Version': '2022-06-28',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ properties: { 'Do Date': { date: { start: tomorrow } } } }),
+        });
+        deferred++;
+        await bumpDeferCount(env, task.id, task.title);
+      } catch {}
+    }
+  }
+
+  // Defer chronic tasks and send warning prompts
+  for (const task of chronicRemaining) {
+    // 1. Send warning message with options to Telegram
+    const deferCount = chronicMap.get(task.id) || 3;
+    const msgText = `🔁 Task "<b>${task.title}</b>" đã né ${deferCount} lần rồi. Tính sao đây ông?`;
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '🅿️ Park', callback_data: `chronic_park:${task.id}` },
+          { text: '✂️ Chia nhỏ', callback_data: `chronic_split:${task.id}` },
+          { text: '🗑️ Drop', callback_data: `chronic_drop:${task.id}` }
+        ]
+      ]
+    };
+    try {
+      await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, msgText, 'HTML', keyboard);
+    } catch (err) {
+      console.error('Failed to send chronic defer warning:', err);
+    }
+
+    // 2. Still defer in background so task is not lost
     if (task.id && task.due_date) {
       try {
         await fetch(`https://api.notion.com/v1/pages/${task.id}`, {
@@ -171,4 +221,27 @@ function buildKeyboard() {
       ],
     ],
   };
+}
+
+// ─── Parked Digest (weekly) ──────────────────────────────────
+async function sendParkedDigest(env) {
+  const chatId = env.TELEGRAM_CHAT_ID;
+  if (!chatId) return;
+
+  try {
+    const tasks = await queryTasks('parked', env);
+    if (!tasks.length) return; // don't send if empty
+
+    let msg = `🅿️ <b>Weekly Parked Digest</b>\nBạn có ${tasks.length} tasks đang để dành:\n\n`;
+    tasks.slice(0, 10).forEach((t, i) => {
+      const p = t.project ? ` [${t.project}]` : '';
+      msg += `  ${i + 1}. ${t.title}${p}\n`;
+    });
+    if (tasks.length > 10) msg += `  ... và ${tasks.length - 10} tasks khác.\n`;
+    msg += `\n💡 Gõ "resume [tên]" để làm lại.`;
+
+    await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, msg, 'HTML');
+  } catch (err) {
+    console.error('Failed to send parked digest:', err);
+  }
 }

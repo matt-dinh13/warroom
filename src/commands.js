@@ -1,27 +1,30 @@
 // Instant command matching v5.3 — anchored regex, zero false positives
 // Only exact command words match. Natural language goes to AI.
 
-import { queryTasks, updateTaskStatus } from './notion.js';
+import { queryTasks, updateTaskStatus, editTask } from './notion.js';
 import { getSummary, buildStatsReport, buildDeferReport, getChronicDefers, clearDeferCount } from './analytics.js';
 import {
   buildTriageResponse, buildOverdueResponse, buildLoadCheckResponse,
   buildListResponse, buildReportResponse, buildBacklogResponse,
-  buildMaterialsResponse, buildCompletionResponse,
+  buildMaterialsResponse, buildCompletionResponse, buildParkedResponse,
 } from './responses.js';
 
 // ─── Safe Commands (anchored ^...$) ─────────────────────
 const SAFE_COMMANDS = [
-  { type: 'plan',     regex: /^(?:plan|plan today|hôm nay|hôm nay làm gì)$/i },
-  { type: 'overdue',  regex: /^(?:overdue|quá hạn|bỏ quên|bỏ sót)$/i },
-  { type: 'load',     regex: /^(?:check load|load|quá tải|overload)$/i },
-  { type: 'list',     regex: /^(?:list|liệt kê|xem tasks?|all tasks?)$/i },
-  { type: 'report',   regex: /^(?:report|báo cáo|summary|tuần)$/i },
-  { type: 'backlog',  regex: /^(?:backlog|ý tưởng|có gì làm|có gì làm không)$/i },
-  { type: 'materials',regex: /^(?:materials?|tài liệu|link|guides?)$/i },
-  { type: 'stats',    regex: /^(?:stats|thống kê|analytics|số liệu)$/i },
-  { type: 'done_num', regex: /^(?:done|xong)\s+(\d+)$/i },
+  { type: 'plan',        regex: /^(?:plan|plan today|hôm nay|hôm nay làm gì)$/i },
+  { type: 'overdue',     regex: /^(?:overdue|quá hạn|bỏ quên|bỏ sót)$/i },
+  { type: 'load',        regex: /^(?:check load|load|quá tải|overload)$/i },
+  { type: 'list',        regex: /^(?:list|liệt kê|xem tasks?|all tasks?)$/i },
+  { type: 'report',      regex: /^(?:report|báo cáo|summary|tuần)$/i },
+  { type: 'backlog',     regex: /^(?:backlog|ý tưởng|có gì làm|có gì làm không)$/i },
+  { type: 'materials',   regex: /^(?:materials?|tài liệu|link|guides?)$/i },
+  { type: 'stats',       regex: /^(?:stats|thống kê|analytics|số liệu)$/i },
+  { type: 'done_num',    regex: /^(?:done|xong)\s+(\d+)$/i },
   // done_name: max ~6 words to avoid matching full sentences ("xong việc rồi nghỉ thôi")
-  { type: 'done_name',regex: /^(?:done|xong)\s+(\S+(?:\s+\S+){0,5})$/i },
+  { type: 'done_name',   regex: /^(?:done|xong)\s+(\S+(?:\s+\S+){0,5})$/i },
+  { type: 'park',        regex: /^(?:park|để dành|khoan làm)\s+(\S+(?:\s+\S+){0,5})$/i },
+  { type: 'resume',      regex: /^(?:resume|làm lại|tiếp tục)\s+(\S+(?:\s+\S+){0,5})$/i },
+  { type: 'parked_list', regex: /^(?:parked|để dành|đang park)$/i },
 ];
 
 /**
@@ -100,6 +103,26 @@ export async function executeInstantCommand(cmd, env, chatId, getLastPlan, saveL
       if (result.id) await clearDeferCount(env, result.id);
       const remaining = await queryTasks('today', env);
       return buildResult('UPDATE', buildCompletionResponse(result, remaining.length, remaining));
+    }
+    case 'park': {
+      const taskName = cmd.match[1].trim();
+      const result = await updateTaskStatus(taskName, 'Pending', env);
+      if (!result) return buildResult('EDIT', `❌ Không tìm thấy "${taskName}".`);
+      if (result.id) await clearDeferCount(env, result.id);
+      return buildResult('EDIT', `🅿️ Đã park "${result.title}". Sẽ im cho tới khi "resume".`);
+    }
+    case 'resume': {
+      const taskName = cmd.match[1].trim();
+      const now = new Date(Date.now() + 7 * 3600000); // VN time
+      const today = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
+      const result = await editTask(taskName, { status: 'To do', deadline: today }, env);
+      if (!result) return buildResult('EDIT', `❌ Không tìm thấy "${taskName}".`);
+      if (result.id) await clearDeferCount(env, result.id);
+      return buildResult('EDIT', `▶️ Đã resume "${result.title}" quay lại plan hôm nay.`);
+    }
+    case 'parked_list': {
+      const tasks = await queryTasks('parked', env);
+      return buildResult('LIST_TASKS', buildParkedResponse(tasks), tasks.length);
     }
     default:
       return null;

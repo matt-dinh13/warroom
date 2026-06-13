@@ -105,6 +105,8 @@ Dùng context để:
 22. Khi user yêu cầu "lặp lại" (recurring/hàng tuần/mỗi ngày) → dùng CAPTURE_BATCH, tạo NHIỀU tasks với due_date khác nhau. VD: "thứ 3 và thứ 5 hàng tuần đến hết tháng 9" → tạo ~34 tasks riêng lẻ.
 23. Project name phải VIẾT HOA đúng: GMA, HOSEL, SALES, EMPULSE, KV, EDU, TEACH, LEARN, PERSONAL, MATERIALS. Match case-insensitive từ user input.
 24. Khi user nói "giữ lại hôm nay / làm tối nay / power block / đừng dời / pin" cho 1 task → set block = "🌙 Power Block". Task có Power Block sẽ KHÔNG bị auto-defer lúc 23:30.
+25. Khi user nói "để dành / park / khoan làm X" → EDIT với updates.status = "Pending".
+26. Khi user nói "làm lại / resume / tiếp tục X" → EDIT với updates.status = "To do" và updates.deadline = ngày hôm nay.
 
 ## NOTION FIELDS (for create/edit)
 title, project (GMA|HOSEL|SALES|EMPULSE|KV|EDU|TEACH|LEARN|PERSONAL|MATERIALS),

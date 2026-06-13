@@ -55,15 +55,15 @@ export async function invalidateCache(env, types = null) {
 // All cacheable query types
 const ALL_QUERY_TYPES = [
   'today', 'upcoming', 'overdue', 'all_active', 'board_all',
-  'board_done_today', 'weekly_report', 'backlog', 'materials', 'calendar_week',
+  'board_done_today', 'weekly_report', 'backlog', 'materials', 'calendar_week', 'parked',
 ];
 
 // Which query types each write op affects (scoped invalidation)
 const INVALIDATION_SCOPES = {
-  create: ['today', 'upcoming', 'overdue', 'all_active', 'board_all', 'calendar_week', 'backlog', 'materials'],
-  status: ['today', 'upcoming', 'overdue', 'all_active', 'board_all', 'board_done_today', 'weekly_report', 'calendar_week'],
-  edit: ['today', 'upcoming', 'overdue', 'all_active', 'board_all', 'calendar_week', 'backlog', 'materials'],
-  archive: ['today', 'upcoming', 'overdue', 'all_active', 'board_all', 'backlog', 'materials', 'calendar_week'],
+  create: ['today', 'upcoming', 'overdue', 'all_active', 'board_all', 'calendar_week', 'backlog', 'materials', 'parked'],
+  status: ['today', 'upcoming', 'overdue', 'all_active', 'board_all', 'board_done_today', 'weekly_report', 'calendar_week', 'parked'],
+  edit: ['today', 'upcoming', 'overdue', 'all_active', 'board_all', 'calendar_week', 'backlog', 'materials', 'parked'],
+  archive: ['today', 'upcoming', 'overdue', 'all_active', 'board_all', 'backlog', 'materials', 'calendar_week', 'parked'],
   schedule: ['board_all', 'calendar_week'],
 };
 
@@ -103,11 +103,28 @@ function normalizeScheduledTime(tStr, defaultDate) {
  * Create a new task in the existing "Today" Notion DB
  */
 export async function createTask(taskData, env) {
+  // Auto-derive Block from scheduled_time if block is not set
+  if (taskData.scheduled_time && !taskData.block) {
+    const normalized = normalizeScheduledTime(taskData.scheduled_time, taskData.due_date);
+    if (normalized && normalized.includes('T')) {
+      const timePart = normalized.split('T')[1];
+      const hour = parseInt(timePart.split(':')[0]);
+      if (!isNaN(hour)) {
+        if (hour < 12) {
+          taskData.block = '☀️ AM';
+        } else if (hour < 18) {
+          taskData.block = '🌤️ PM';
+        }
+      }
+    }
+  }
+
   const properties = {
     'Name': {
       title: [{ text: { content: taskData.title || 'Untitled Task' } }],
     },
   };
+
 
   // Select properties
   if (taskData.project) {
@@ -227,6 +244,7 @@ export async function queryTasks(queryType, env, options = {}) {
       filter = {
         and: [
           { property: 'State', status: { does_not_equal: 'Completed' } },
+          { property: 'State', status: { does_not_equal: 'Pending / Wait for approved' } },
           {
             or: [
               { property: 'Do Date', date: { on_or_before: today } },
@@ -265,6 +283,7 @@ export async function queryTasks(queryType, env, options = {}) {
       filter = {
         and: [
           { property: 'State', status: { does_not_equal: 'Completed' } },
+          { property: 'State', status: { does_not_equal: 'Pending / Wait for approved' } },
           {
             or: [
               { property: 'Deadline', date: { before: today } },
@@ -279,6 +298,7 @@ export async function queryTasks(queryType, env, options = {}) {
       filter = {
         and: [
           { property: 'State', status: { does_not_equal: 'Completed' } },
+          { property: 'State', status: { does_not_equal: 'Pending / Wait for approved' } },
           { property: 'Urgency', select: { does_not_equal: '⚪ Someday' } },
         ],
       };
@@ -345,6 +365,14 @@ export async function queryTasks(queryType, env, options = {}) {
       };
       break;
     }
+
+    case 'parked':
+      filter = {
+        and: [
+          { property: 'State', status: { equals: 'Pending / Wait for approved' } }
+        ]
+      };
+      break;
 
     default:
       filter = undefined;
@@ -860,3 +888,146 @@ export async function backfillDoDate(env) {
   }
   return { total: tasks.length, updated };
 }
+
+/**
+ * Archive a task by Notion page ID directly (no fuzzy search)
+ */
+export async function archiveTaskById(pageId, env) {
+  const response = await fetchWithRetry(`${NOTION_BASE}/pages/${pageId}`, {
+    method: 'PATCH',
+    headers: notionHeaders(env.NOTION_API_KEY),
+    body: JSON.stringify({ archived: true }),
+  });
+
+  const result = parseNotionTask(await response.json());
+  await invalidateCache(env, INVALIDATION_SCOPES.archive);
+  return result;
+}
+
+/**
+ * Retrieve a task by Notion page ID directly (no fuzzy search)
+ */
+export async function getTaskById(pageId, env) {
+  const response = await fetchWithRetry(`${NOTION_BASE}/pages/${pageId}`, {
+    method: 'GET',
+    headers: notionHeaders(env.NOTION_API_KEY),
+  });
+  return parseNotionTask(await response.json());
+}
+
+/**
+ * Flags cells in specific Notion database columns with sentinel values ("DELETE ME") for manual deletion.
+ */
+export async function markColumnsForDeletion(columns, env) {
+  // 1. Retrieve DB schema to find property types
+  const dbRes = await fetch(`${NOTION_BASE}/databases/${env.NOTION_TASKS_DB_ID}`, {
+    method: 'GET',
+    headers: notionHeaders(env.NOTION_API_KEY),
+  });
+  if (!dbRes.ok) {
+    throw new Error(`Failed to retrieve database schema: ${await dbRes.text()}`);
+  }
+  const dbData = await dbRes.json();
+  const properties = dbData.properties || {};
+
+  const colConfigs = {};
+  const summary = {};
+
+  for (const col of columns) {
+    const prop = properties[col];
+    if (!prop) {
+      summary[col] = { status: 'skipped', note: 'Column not found in Notion schema' };
+      continue;
+    }
+    const type = prop.type;
+    if (type === 'relation' || type === 'people' || type === 'files') {
+      summary[col] = { type, status: 'skipped', note: 'Relation/People/Files column. Must be deleted directly in Notion UI.' };
+      continue;
+    }
+    if (type === 'status') {
+      summary[col] = { type, status: 'skipped', note: 'Status column. Cannot auto-create status options via API. Please delete directly in Notion UI.' };
+      continue;
+    }
+
+    let payloadValue;
+    if (type === 'rich_text') {
+      payloadValue = { rich_text: [{ text: { content: 'DELETE ME' } }] };
+    } else if (type === 'title') {
+      payloadValue = { title: [{ text: { content: 'DELETE ME' } }] };
+    } else if (type === 'select') {
+      payloadValue = { select: { name: 'DELETE ME' } };
+    } else if (type === 'multi_select') {
+      payloadValue = { multi_select: [{ name: 'DELETE ME' }] };
+    } else if (type === 'number') {
+      payloadValue = { number: 99999 };
+    } else if (type === 'date') {
+      payloadValue = { date: { start: '1999-01-01' } };
+    } else if (type === 'checkbox') {
+      payloadValue = { checkbox: true };
+    } else {
+      summary[col] = { type, status: 'skipped', note: `Unsupported column type: ${type}. Please delete directly in Notion UI.` };
+      continue;
+    }
+
+    colConfigs[col] = payloadValue;
+    summary[col] = { type, status: 'marked', updated: 0 };
+  }
+
+  // If no columns can be marked, return summary early
+  const activeCols = Object.keys(colConfigs);
+  if (activeCols.length === 0) {
+    return summary;
+  }
+
+  // 2. Query all pages and patch them
+  let cursor = undefined;
+  let hasMore = true;
+  do {
+    const queryBody = { page_size: 100 };
+    if (cursor) queryBody.start_cursor = cursor;
+
+    const res = await fetch(`${NOTION_BASE}/databases/${env.NOTION_TASKS_DB_ID}/query`, {
+      method: 'POST',
+      headers: notionHeaders(env.NOTION_API_KEY),
+      body: JSON.stringify(queryBody),
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to query database pages: ${await res.text()}`);
+    }
+
+    const data = await res.json();
+    const pages = data.results || [];
+    cursor = data.next_cursor;
+    hasMore = data.has_more;
+
+    for (const page of pages) {
+      // Build PATCH properties
+      const patchProps = {};
+      for (const col of activeCols) {
+        patchProps[col] = colConfigs[col];
+      }
+
+      const patchRes = await fetch(`${NOTION_BASE}/pages/${page.id}`, {
+        method: 'PATCH',
+        headers: notionHeaders(env.NOTION_API_KEY),
+        body: JSON.stringify({ properties: patchProps }),
+      });
+
+      if (patchRes.ok) {
+        for (const col of activeCols) {
+          summary[col].updated++;
+        }
+      } else {
+        console.error(`Failed to patch page ${page.id}:`, await patchRes.text());
+      }
+    }
+  } while (hasMore);
+
+  // Invalidate cache since we modified properties of tasks
+  await invalidateCache(env);
+
+  return summary;
+}
+
+
+

@@ -160,7 +160,10 @@ export async function getChronicDefers(env, threshold = 3) {
     const out = [];
     for (const k of list.keys) {
       const rec = await env.CHAT_MEMORY.get(k.name, 'json');
-      if (rec && rec.count >= threshold) out.push(rec);
+      if (rec && rec.count >= threshold) {
+        rec.id = k.name.substring(DEFER_PREFIX.length);
+        out.push(rec);
+      }
     }
     return out.sort((a, b) => b.count - a.count);
   } catch { return []; }

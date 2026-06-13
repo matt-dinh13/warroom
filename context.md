@@ -1,7 +1,8 @@
 # 🚀 Stratt — Project Context
 
 > File này chứa đủ context để developer mới (hoặc AI agent) tiếp tục phát triển mà không cần hỏi lại.
-> Cập nhật lần cuối: 2026-06-08 (v5.8)
+> Cập nhật lần cuối: 2026-06-13 (v6.3.1)
+
 
 ---
 
@@ -170,9 +171,10 @@ stratt/  (local dir: warroom/)
 | POST | `/api/tasks/update` | Cookie | Update task status by page ID |
 | GET | `/api/calendar` | Cookie | Calendar: all active tasks for week |
 | POST | `/api/calendar/schedule` | Cookie | Set/remove scheduled datetime |
-| GET | `/api/health` | No | Health check (v5.0.0) |
+| GET | `/api/health` | No | Health check (v6.3.1) |
 | POST | `/api/telegram` | Chat ID | Telegram webhook + callback_query |
 | POST | `/api/setup-telegram` | Cookie | Set Telegram webhook URL |
+| POST | `/api/mark-columns-for-deletion` | Cookie | One-time: mark database columns for manual deletion |
 
 ---
 
@@ -189,8 +191,12 @@ stratt/  (local dir: warroom/)
 | `materials` | MATERIALS | `^materials$` |
 | `done N` | UPDATE | `^done\s+\d+$` |
 | `done [name]` | UPDATE | `^done\s+.+$` |
+| `park [name]` | EDIT | `^(?:park\|để dành\|khoan làm)\s+(\S+(?:\s+\S+){0,5})$` |
+| `resume [name]` | EDIT | `^(?:resume\|làm lại\|tiếp tục)\s+(\S+(?:\s+\S+){0,5})$` |
+| `parked` | LIST_TASKS | `^(?:parked\|để dành\|đang park)$` |
 
 All other messages → MiniMax AI fallback.
+
 
 ---
 
@@ -262,9 +268,14 @@ TELEGRAM_CHAT_ID    — Matt's Telegram chat ID
 | **5.6** | **2026-06-08** | **Reliability (Sprint 2): Notion write retry (429-safe), per-query cache invalidation, pin task (Power Block/In progress skip auto-defer)** |
 | **5.7** | **2026-06-08** | **Schema cleanup — bỏ Priority (trùng Urgency) + Energy (ghost field) khỏi code & prompt. Confirmation gọn hơn** |
 | **5.8** | **2026-06-08** | **Analytics v2 (behavioral): hourly heatmap, weekday/weekend split, per-task defer tracking (guilt-loop detection), chronic-defer report trong "stats"** |
-| **5.5** | **2026-06-08** | **Default calendar to week view, Completed tasks visible on timeline, 24h toggle checkbox** |
-| **5.6** | **2026-06-08** | **Increase MiniMax API timeout to 60 seconds** |
-| **5.7** | **2026-06-08** | **Notion task caching in Cloudflare KV & AI duplicate verification grounding** |
-| **5.8** | **2026-06-08** | **Robust scheduled_time normalization (time-only inputs) in createTask/editTask** |
+| **5.9** | **2026-06-08** | **Default calendar to week view, Completed tasks visible on timeline, 24h toggle checkbox** |
+| **5.9.1** | **2026-06-08** | **Increase MiniMax API timeout to 60 seconds** |
+| **5.9.2** | **2026-06-08** | **Notion task caching in Cloudflare KV & AI duplicate verification grounding** |
+| **5.9.3** | **2026-06-08** | **Robust scheduled_time normalization (time-only inputs) in createTask/editTask** |
+| **6.0** | **2026-06-13** | **Phase V6.1 — Reliability upgrade: deterministic-first capture, JSON-repair retry, Confirm-card validation for task captures** |
+| **6.1** | **2026-06-13** | **Phase V6.2 — Parked state: Pending status isolation, weekly digest cron (Monday 8:00), interactive auto-defer prompts (Park/Split/Drop)** |
+| **6.2** | **2026-06-13** | **Phase V6.3 — Notion DB cleanup: auto Block (AM/PM) derivation from scheduled_time, /api/mark-columns-for-deletion endpoint** |
+| **6.3** | **2026-06-13** | **Phase V6 Round 2 Fixes — early return analytics flush, overload warning in resolve path, direct_parse vs AI analytics split** |
+
 
 

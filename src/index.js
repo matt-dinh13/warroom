@@ -1,10 +1,11 @@
 // Worker entry point — route API requests
 
 import { isAuthenticated, handleLogin, handleLogout } from './auth.js';
-import { processChat, tryDirectParse } from './triage.js';
+import { processChat } from './triage.js';
+import { tryDirectParse } from './parsers.js';
 import { handleTelegramWebhook, setTelegramWebhook } from './telegram.js';
 import { handleScheduled } from './reminders.js';
-import { backfillDoDate, queryTasks, createTask, updateTaskStatusById, updateTaskSchedule } from './notion.js';
+import { backfillDoDate, queryTasks, createTask, updateTaskStatusById, updateTaskSchedule, markColumnsForDeletion } from './notion.js';
 import { recordDelta, getSummary, buildStatsReport, getChronicDefers, clearDeferCount } from './analytics.js';
 
 // ─── Security: Never leak secrets in any response ───────────
@@ -198,7 +199,7 @@ export default {
             JSON.stringify({
               status: 'ok',
               timestamp: new Date().toISOString(),
-              version: '5.8.0',
+              version: '6.3.1',
               telegram: !!env.TELEGRAM_BOT_TOKEN,
               cron: true,
             }),
@@ -237,24 +238,39 @@ export default {
             );
           }
           const body = await request.json();
-          if (!body.title?.trim()) {
+          const tasks = Array.isArray(body) ? body : [body];
+          if (tasks.length === 0 || (!tasks[0].title && !body.title)) {
             return new Response(
               JSON.stringify({ error: 'Title is required' }),
               { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
           }
-          const taskData = {
-            title: body.title.trim(),
-            project: body.project || 'PERSONAL',
-            urgency: body.project === 'MATERIALS' ? '⚪ Someday' : (body.urgency || '🟡 Important'),
-            source: body.source || 'EIT',
-          };
-          if (body.deadline) taskData.due_date = body.deadline;
-          if (body.resource) taskData.resource = body.resource;
-          const result = await createTask(taskData, env);
-          await recordDelta(env, { captures: { board: 1 } });
+
+          const results = [];
+          for (const task of tasks) {
+            const taskData = {
+              title: (task.title || '').trim(),
+              project: task.project || 'PERSONAL',
+              urgency: task.project === 'MATERIALS' ? '⚪ Someday' : (task.urgency || '🟡 Important'),
+              source: task.source || 'EIT',
+            };
+            if (task.deadline || task.due_date) taskData.due_date = task.deadline || task.due_date;
+            if (task.resource) taskData.resource = task.resource;
+
+            // Expand to receive estimate, scheduled_time, assigned_by, block, context
+            if (task.estimate) taskData.estimate = parseInt(task.estimate);
+            if (task.scheduled_time) taskData.scheduled_time = task.scheduled_time;
+            if (task.assigned_by) taskData.assigned_by = task.assigned_by;
+            if (task.block) taskData.block = task.block;
+            if (task.context) taskData.context = task.context;
+
+            const result = await createTask(taskData, env);
+            results.push(result);
+          }
+
+          await recordDelta(env, { captures: { board: tasks.length } });
           return new Response(
-            JSON.stringify({ success: true, task: result }),
+            JSON.stringify({ success: true, tasks: results, task: results[0] }),
             { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
@@ -399,6 +415,22 @@ export default {
           const result = await backfillDoDate(env);
           return new Response(
             JSON.stringify({ success: true, ...result }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // POST /api/mark-columns-for-deletion — One-time: mark database columns for manual deletion (requires auth)
+        if (path === '/api/mark-columns-for-deletion' && request.method === 'POST') {
+          if (!(await isAuthenticated(request, env))) {
+            return new Response(
+              JSON.stringify({ error: 'Unauthorized' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          const body = await request.json();
+          const result = await markColumnsForDeletion(body.columns || [], env);
+          return new Response(
+            JSON.stringify({ success: true, summary: result }),
             { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }

@@ -244,7 +244,11 @@ async function sendChat(message) {
     loadingEl.remove();
 
     if (res.ok) {
-      addMessage(data.response_text || data.error || '(no response)', 'bot');
+      if (data.needs_confirmation && data.pending_action) {
+        addConfirmMessage(data.response_text || '', data.pending_action, 'bot');
+      } else {
+        addMessage(data.response_text || data.error || '(no response)', 'bot');
+      }
     } else {
       addMessage(`❌ ${data.error || 'Lỗi server'}`, 'bot');
     }
@@ -255,6 +259,57 @@ async function sendChat(message) {
 
   saveChatHistory();
   scrollToBottom();
+}
+
+function addConfirmMessage(text, pendingAction, sender) {
+  const div = document.createElement('div');
+  div.className = `message ${sender} confirm-message`;
+  const avatar = sender === 'bot' ? '🤖' : '👤';
+  div.innerHTML = `
+    <div class="message-avatar">${avatar}</div>
+    <div class="message-content">
+      <div class="confirm-text">${formatMessage(text)}</div>
+      <div class="confirm-buttons" style="margin-top: 10px; display: flex; gap: 8px;">
+        <button class="confirm-btn-yes" style="padding: 6px 12px; background: var(--success, #2e7d32); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">✅ Tạo</button>
+        <button class="confirm-btn-no" style="padding: 6px 12px; background: var(--error, #c62828); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">✏️ Sửa</button>
+      </div>
+    </div>
+  `;
+  
+  const yesBtn = div.querySelector('.confirm-btn-yes');
+  const noBtn = div.querySelector('.confirm-btn-no');
+  
+  yesBtn.addEventListener('click', () => {
+    div.querySelector('.confirm-buttons').remove();
+    sendChat('ok');
+  });
+  
+  noBtn.addEventListener('click', () => {
+    div.querySelector('.confirm-buttons').remove();
+    const userMsgs = chatMessages.querySelectorAll('.message.user');
+    const lastUserMsg = userMsgs[userMsgs.length - 1];
+    if (lastUserMsg) {
+      chatInput.value = lastUserMsg.querySelector('.message-content').textContent || '';
+      autoResize(chatInput);
+    }
+    fetch(`${API}/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'hủy' }),
+    }).then(() => {
+      const note = document.createElement('div');
+      note.className = 'confirm-cancelled-note';
+      note.style.fontSize = '0.85em';
+      note.style.color = '#888';
+      note.style.fontStyle = 'italic';
+      note.style.marginTop = '4px';
+      note.textContent = '✏️ Đã huỷ nháp. Bạn có thể sửa câu lệnh ở ô nhập liệu bên dưới.';
+      div.querySelector('.message-content').appendChild(note);
+    });
+  });
+
+  chatMessages.appendChild(div);
+  scrollToBottom();
+  return div;
 }
 
 function addMessage(text, sender) {
@@ -292,8 +347,11 @@ function saveChatHistory() {
   const msgs = [];
   chatMessages.querySelectorAll('.message').forEach(el => {
     const sender = el.classList.contains('user') ? 'user' : 'bot';
-    const content = el.querySelector('.message-content')?.innerHTML || '';
-    msgs.push({ sender, content });
+    const contentClone = el.querySelector('.message-content')?.cloneNode(true);
+    if (contentClone) {
+      contentClone.querySelector('.confirm-buttons')?.remove();
+      msgs.push({ sender, content: contentClone.innerHTML });
+    }
   });
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs.slice(-MAX_HISTORY))); } catch {}
 }

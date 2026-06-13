@@ -1,5 +1,8 @@
 // Telegram Bot handler v3.0 — HTML parse mode + inline keyboard
 
+import { updateTaskStatusById, archiveTaskById, getTaskById } from './notion.js';
+import { clearDeferCount } from './analytics.js';
+
 const TELEGRAM_API = 'https://api.telegram.org/bot';
 
 export async function handleTelegramWebhook(update, env, processChat) {
@@ -64,9 +67,19 @@ export async function handleTelegramWebhook(update, env, processChat) {
     let responseText = result.response_text || 'Không có response.';
     if (result.follow_up_question) responseText += `\n\n❓ ${result.follow_up_question}`;
 
-    await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, formatForTelegram(responseText), 'HTML',
-      buildMainKeyboard()
-    );
+    let replyMarkup = buildMainKeyboard();
+    if (result.needs_confirmation) {
+      replyMarkup = {
+        inline_keyboard: [
+          [
+            { text: '✅ Tạo', callback_data: 'confirm_create' },
+            { text: '❌ Bỏ', callback_data: 'confirm_cancel' }
+          ]
+        ]
+      };
+    }
+
+    await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, formatForTelegram(responseText), 'HTML', replyMarkup);
   } catch (err) {
     console.error('Telegram error:', err);
     await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,
@@ -87,12 +100,54 @@ async function handleCallbackQuery(query, env, processChat) {
     body: JSON.stringify({ callback_query_id: query.id }),
   });
 
+  if (data.startsWith('chronic_park:')) {
+    const taskId = data.substring('chronic_park:'.length);
+    try {
+      const task = await updateTaskStatusById(taskId, 'Pending', env);
+      await clearDeferCount(env, taskId);
+      await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, `🅿️ Đã park task thành công: <b>${task.title}</b>`, 'HTML');
+    } catch (err) {
+      await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, `⚠️ Lỗi khi park task: ${err.message}`);
+    }
+    return new Response('OK');
+  }
+
+  if (data.startsWith('chronic_drop:')) {
+    const taskId = data.substring('chronic_drop:'.length);
+    try {
+      const task = await archiveTaskById(taskId, env);
+      await clearDeferCount(env, taskId);
+      await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, `🗑️ Đã drop (xóa) task thành công: <b>${task.title}</b>`, 'HTML');
+    } catch (err) {
+      await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, `⚠️ Lỗi khi drop task: ${err.message}`);
+    }
+    return new Response('OK');
+  }
+
+  if (data.startsWith('chronic_split:')) {
+    const taskId = data.substring('chronic_split:'.length);
+    try {
+      const task = await getTaskById(taskId, env);
+      await sendTelegramMessage(
+        env.TELEGRAM_BOT_TOKEN,
+        chatId,
+        `✂️ Để chia nhỏ task, hãy copy tin nhắn sau và chỉnh sửa các subtask:\n\n<code>chia nhỏ ${task.title}</code>`,
+        'HTML'
+      );
+    } catch (err) {
+      await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, `⚠️ Lỗi: ${err.message}`);
+    }
+    return new Response('OK');
+  }
+
   const actionMap = {
     'action_plan': 'plan today',
     'action_backlog': 'có gì làm không?',
     'action_load': 'check load',
     'action_overdue': 'bỏ quên gì không?',
     'action_report': 'weekly report',
+    'confirm_create': 'ok',
+    'confirm_cancel': 'hủy',
   };
 
   const chatMessage = actionMap[data];
@@ -106,8 +161,19 @@ async function handleCallbackQuery(query, env, processChat) {
 
   try {
     const result = await processChat(chatMessage, env, String(chatId));
+    let replyMarkup = buildMainKeyboard();
+    if (result.needs_confirmation) {
+      replyMarkup = {
+        inline_keyboard: [
+          [
+            { text: '✅ Tạo', callback_data: 'confirm_create' },
+            { text: '❌ Bỏ', callback_data: 'confirm_cancel' }
+          ]
+        ]
+      };
+    }
     await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,
-      formatForTelegram(result.response_text || 'Không có response.'), 'HTML', buildMainKeyboard()
+      formatForTelegram(result.response_text || 'Không có response.'), 'HTML', replyMarkup
     );
   } catch (err) {
     await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,

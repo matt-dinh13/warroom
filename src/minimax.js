@@ -21,7 +21,52 @@ export async function callMiniMax(systemPrompt, userMessage, apiKey, messages = 
     { role: 'user', content: userMessage },
   ];
 
-  // Fetch with 60s timeout
+  let content;
+  try {
+    content = await callOnce(msgPayload, apiKey);
+  } catch (err) {
+    throw err;
+  }
+
+  let parsed = parseStrategies(content);
+  if (parsed) return parsed;
+
+  // Strategy 4 fallback/repair: JSON parse failed. Attempt 1 repair retry.
+  console.warn('MiniMax JSON parse failed. Attempting JSON-repair retry... Raw content:', content.substring(0, 200));
+
+  const repairPayload = [
+    ...msgPayload,
+    { role: 'assistant', content: content },
+    { role: 'user', content: 'Your previous response was not a valid JSON. Please correct it and return ONLY a valid JSON object matching the schema: {"intent": "...", "response_text": "...", "notion_action": {...}}. DO NOT wrap in markdown, DO NOT return any text outside of the JSON object.' }
+  ];
+
+  try {
+    const repairContent = await callOnce(repairPayload, apiKey);
+    const repairedParsed = parseStrategies(repairContent);
+    if (repairedParsed) {
+      console.warn('MiniMax JSON repair retry SUCCEEDED!');
+      return repairedParsed;
+    }
+    console.error('MiniMax JSON repair retry failed. Repaired content:', repairContent.substring(0, 200));
+  } catch (err) {
+    console.error('Error during MiniMax JSON repair retry:', err);
+  }
+
+  // Final strategy: nothing worked — return as CLARIFY with the raw text
+  console.error('MiniMax JSON parse failed after repair. Raw content:', content.substring(0, 500));
+  return {
+    intent: 'CLARIFY',
+    response_text: content || 'Xin lỗi, mình không hiểu. Thử gõ lại?',
+    notion_action: null,
+    needs_confirmation: false,
+    follow_up_question: null,
+  };
+}
+
+/**
+ * Perform a single chat completion call with timeouts and retries
+ */
+async function callOnce(msgPayload, apiKey) {
   let response;
   const fetchOpts = {
     method: 'POST',
@@ -72,10 +117,13 @@ export async function callMiniMax(systemPrompt, userMessage, apiKey, messages = 
   }
 
   // MiniMax M2.7 wraps reasoning in <think>...</think> tags — strip them
-  content = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  return content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+}
 
-  // ─── Robust JSON extraction ─────────────────────────────
-  // AI sometimes returns text + ```json {...} ``` or text + bare JSON
+/**
+ * Attempt to parse task data from AI response using multiple strategies
+ */
+function parseStrategies(content) {
   // Strategy 1: Try direct parse (pure JSON response)
   let parsed = tryParseJSON(content);
   if (parsed) return parsed;
@@ -94,15 +142,7 @@ export async function callMiniMax(systemPrompt, userMessage, apiKey, messages = 
     if (parsed) return parsed;
   }
 
-  // Strategy 4: Nothing worked — return as CLARIFY with the raw text
-  console.error('MiniMax JSON parse failed. Raw content:', content.substring(0, 500));
-  return {
-    intent: 'CLARIFY',
-    response_text: content || 'Xin lỗi, mình không hiểu. Thử gõ lại?',
-    notion_action: null,
-    needs_confirmation: false,
-    follow_up_question: null,
-  };
+  return null;
 }
 
 function tryParseJSON(str) {

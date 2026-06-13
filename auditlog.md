@@ -1349,6 +1349,41 @@ User message
 
 ---
 
+## 2026-06-13 — v6.0-v6.3.1 Stratt v6 Upgrades & Fixes
+
+### Scope
+Thiết lập trạng thái Parked, cảnh báo auto-defer qua Telegram, tự động điền AM/PM block, dọn cột rác Notion và vá lỗi phân phối analytics.
+
+### Changes Made
+
+| File | Change |
+|------|--------|
+| `notion.js` | Loại trừ status `Pending / Wait for approved` khỏi các view active; thêm case `parked`; xuất helpers `archiveTaskById`, `getTaskById`, và `markColumnsForDeletion`. Tự động điền Block `☀️ AM` / `🌤️ PM` dựa theo `scheduled_time`. |
+| `commands.js` | Thêm regex và logic xử lý instant commands: `park`, `resume`, `parked`. |
+| `reminders.js` | Gửi weekly digest các task đang park vào sáng Thứ Hai. Trích xuất task bị defer >= 3 lần, gửi tin cảnh báo kèm các nút inline Park, Split, Drop trong khi vẫn defer ngầm. |
+| `telegram.js` | Xử lý callback queries `chronic_park`, `chronic_drop`, và `chronic_split`. |
+| `triage.js` | Ghi analytics sớm trên các luồng confirm-card return sớm. Kiểm tra overload cảnh báo khi confirm tạo task. Sửa pending KV format để phân biệt nguồn `direct_parse` vs `AI`. |
+| `index.js` | Thêm route `POST /api/mark-columns-for-deletion` phục vụ dọn dẹp DB Notion. Cập nhật version lên 6.3.1. |
+
+### Technical Decisions
+
+#### D1: Analytics early-flush helper
+- **Decision:** Viết helper `flushAIAnalytics` để ghi analytics ngay trên các nhánh return sớm của triage.js.
+- **Reason:** Đảm bảo ghi nhận đúng `ai_calls`/`ai_latency` khi show confirm-card thay vì bị drop mất.
+
+#### D2: One-off flag-marker strategy for Notion column deletion
+- **Decision:** Viết API endpoint `/api/mark-columns-for-deletion` điền "DELETE ME" thay vì trực tiếp xóa cột qua API.
+- **Reason:** Đảm bảo an toàn tuyệt đối, cho phép user kiểm tra visual trực quan trên Notion trước khi xóa cột bằng tay.
+
+### Verification Results
+| Test | Result | Notes |
+|------|--------|-------|
+| `test_parked.sh` | ✅ Pass | Kiểm tra park/resume & Telegram callbacks hoạt động hoàn hảo |
+| `test_block_derive.sh` | ✅ Pass | Tự động điền AM/PM block cho task 9am / 3pm chính xác |
+| `test_fixes.sh` | ✅ Pass | Ghi nhận analytics confirm-card đúng, báo overload, đánh dấu cột Notion thành công |
+
+---
+
 ## Template for Future Entries
 
 ```markdown
@@ -1373,3 +1408,4 @@ Brief description of what was done.
 ### Notes
 Any additional context.
 ```
+

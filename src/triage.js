@@ -7,134 +7,15 @@ import { callMiniMax } from './minimax.js';
 import { createTask, queryTasks, updateTaskStatus, editTask, archiveTask } from './notion.js';
 import { SYSTEM_PROMPT, PROJECT_SOURCE_MAP } from './prompts.js';
 import { matchInstantCommand, executeInstantCommand } from './commands.js';
-import { getVNContext, buildCaptureConfirmation, buildCompletionResponse } from './responses.js';
-import { tryParseCaptureFromAIResponse, detectFallbackIntent, extractUpdateTarget } from './parsers.js';
+import { getVNContext, buildCaptureConfirmation, buildCompletionResponse, buildConfirmCard } from './responses.js';
+import { tryParseCaptureFromAIResponse, detectFallbackIntent, extractUpdateTarget, tryDirectParse, scoreDirectParse, enrichWithScheduledTime } from './parsers.js';
 import { recordDelta, getHourKey, isWeekendVN } from './analytics.js';
 
 // ─── Conversation Memory ─────────────────────────────
 const MEMORY_TTL = 86400; // 24h
 const MAX_MEMORY = 5;
 
-// ─── Direct Task Parser (fallback when AI fails) ─────────
-// Parses "tạo task..." messages directly without AI
-// Returns: single task object OR array of tasks (for multi-day)
-export function tryDirectParse(msg) {
-  const lower = msg.toLowerCase();
-  if (!/tạo|thêm|add|create/.test(lower)) return null;
 
-  const VALID_PROJECTS = ['GMA', 'HOSEL', 'SALES', 'EMPULSE', 'KV', 'EDU', 'TEACH', 'LEARN', 'PERSONAL', 'MATERIALS'];
-  const now = new Date(Date.now() + 7 * 3600000); // VN time
-  const vnDate = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
-
-  // ── Title: after "tên" or "task" keyword
-  let title = null;
-  const titleMatch = msg.match(/(?:tên|task)\s+(.+?)(?:\n|,|$)/i);
-  if (titleMatch) {
-    title = titleMatch[1].trim();
-  } else {
-    const firstLine = msg.split('\n')[0].replace(/^.*?(?:tạo|thêm|add|create)\s*(?:task)?\s*/i, '').trim();
-    if (firstLine) title = firstLine;
-  }
-  if (!title) return null;
-
-  // ── Project
-  let project = null;
-  const projMatch = msg.match(/(?:dự án|project|DA)\s+(\S+)/i);
-  if (projMatch) {
-    const upper = projMatch[1].toUpperCase();
-    project = VALID_PROJECTS.includes(upper) ? upper : projMatch[1];
-  }
-
-  // ── Estimate
-  let estimate = null;
-  const estMatch = msg.match(/(\d+)\s*(?:phút|min(?:ute)?s?|p(?!m\b))/i);
-  if (estMatch) estimate = parseInt(estMatch[1]);
-
-  // ── Time (2:30pm, 10am, 14:00...)
-  let hour = null, min = 0;
-  const timeMatch = msg.match(/(\d{1,2})\s*[:]\s*(\d{2})\s*(?:am|pm|sáng|chiều|tối)?/i)
-    || msg.match(/(\d{1,2})\s*(?:am|pm|sáng|chiều|tối)/i);
-  if (timeMatch) {
-    hour = parseInt(timeMatch[1]);
-    min = parseInt(timeMatch[2] || '0') || 0;
-    if (/pm|chiều|tối/i.test(msg) && hour < 12) hour += 12;
-    if (/am|sáng/i.test(msg) && hour === 12) hour = 0;
-  }
-
-  // ── Weekday parsing (thứ 2 = Monday ... thứ 7 = Saturday, chủ nhật = Sunday)
-  const DAY_MAP = { '2': 1, '3': 2, '4': 3, '5': 4, '6': 5, '7': 6 };
-  const weekdayMatches = [...lower.matchAll(/thứ\s*(\d)/g)].map(m => DAY_MAP[m[1]]).filter(d => d !== undefined);
-  if (/chủ\s*nhật/i.test(lower)) weekdayMatches.push(0);
-
-  // Calculate next occurrence of each weekday
-  function nextWeekday(targetDay) {
-    const d = new Date(now);
-    const currentDay = d.getUTCDay();
-    let diff = targetDay - currentDay;
-    if (diff <= 0) diff += 7; // always next occurrence
-    d.setUTCDate(d.getUTCDate() + diff);
-    return d;
-  }
-
-  // ── Build task(s)
-  function buildTask(dateObj) {
-    const dateStr = vnDate(dateObj);
-    const task = {
-      title,
-      urgency: '🟡 Important',
-    };
-    if (project) {
-      task.project = project;
-      task.source = PROJECT_SOURCE_MAP[project] || 'EIT';
-    }
-    if (estimate) task.estimate = estimate;
-    task.due_date = dateStr;
-    if (hour !== null) {
-      task.scheduled_time = `${dateStr}T${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
-    }
-    return task;
-  }
-
-  if (weekdayMatches.length > 0) {
-    // Multi-day: return array of tasks
-    const tasks = weekdayMatches.map(day => buildTask(nextWeekday(day)));
-    return tasks.length === 1 ? tasks[0] : tasks;
-  }
-
-  // No weekday specified → use today
-  return buildTask(now);
-}
-
-// ─── Scheduled Time Parser ─────────────────────────────
-// If user mentioned a specific time (10am, 2pm, 14:00, etc.),
-// parse it and set scheduled_time on the task data
-function enrichWithScheduledTime(taskData, userMsg) {
-  if (taskData.scheduled_time) return; // AI already set it
-  const timeMatch = userMsg.match(/(\d{1,2})\s*(?:h|:?\s*(?:00|30)?\s*)?\s*(?:am|pm|sáng|chiều|tối)/i)
-    || userMsg.match(/(\d{1,2}):(\d{2})/)
-    || userMsg.match(/(\d{1,2})\s*(?:am|pm)/i);
-  if (!timeMatch) return;
-
-  let hour = parseInt(timeMatch[1]);
-  const min = parseInt(timeMatch[2] || '0') || 0;
-  if (/pm|chiều|tối/i.test(userMsg) && hour < 12) hour += 12;
-  if (/am|sáng/i.test(userMsg) && hour === 12) hour = 0;
-
-  const now = new Date(Date.now() + 7 * 3600000); // VN time
-  const vnDateStr = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
-  let schedDate = taskData.due_date || vnDateStr(now);
-  if (/mai|ngày mai|tomorrow/i.test(userMsg)) {
-    schedDate = vnDateStr(new Date(now.getTime() + 86400000));
-  }
-  taskData.scheduled_time = `${schedDate}T${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
-  if (!taskData.due_date) taskData.due_date = schedDate;
-
-  // Also try to extract estimate if missing
-  if (!taskData.estimate) {
-    const estMatch = userMsg.match(/(\d+)\s*(?:phút|min(?:ute)?s?|p(?!m\b))/i);
-    if (estMatch) taskData.estimate = parseInt(estMatch[1]);
-  }
-}
 
 async function getConversation(chatId, env) {
   if (!env.CHAT_MEMORY) return [];
@@ -168,11 +49,122 @@ function buildResult(intent, text, taskCount) {
   return { intent, response_text: text, needs_confirmation: false, follow_up_question: null, task_count: taskCount };
 }
 
+// ─── Pending Task Draft Helpers (for confirmation) ──────
+export async function savePendingTask(chatId, taskData, env, viaAI = true) {
+  if (!env.CHAT_MEMORY) return;
+  try {
+    await env.CHAT_MEMORY.put(`pending:${chatId}`, JSON.stringify({ tasks: taskData, viaAI }), { expirationTtl: 600 });
+  } catch (err) {
+    console.error('savePendingTask error:', err);
+  }
+}
+
+export async function getPendingTask(chatId, env) {
+  if (!env.CHAT_MEMORY) return null;
+  try {
+    const raw = await env.CHAT_MEMORY.get(`pending:${chatId}`, 'json');
+    if (!raw) return null;
+    if (raw.tasks !== undefined && raw.viaAI !== undefined) {
+      return raw;
+    }
+    // Fallback for old format
+    return { tasks: raw, viaAI: true };
+  } catch {
+    return null;
+  }
+}
+
+
+export async function clearPendingTask(chatId, env) {
+  if (!env.CHAT_MEMORY) return;
+  try {
+    await env.CHAT_MEMORY.delete(`pending:${chatId}`);
+  } catch {}
+}
+
+async function flushAIAnalytics(env, analytics, intent, { aiFailure = false } = {}) {
+  try {
+    analytics.intents = { [intent]: 1 };
+    if (aiFailure) analytics.ai_failures = 1;
+    await recordDelta(env, analytics);
+  } catch (err) {
+    console.error('flushAIAnalytics error:', err);
+  }
+}
+
 // ─── Main Entry ───────────────────────────────────────
 export async function processChat(userMessage, env, chatId = 'web') {
   const msg = userMessage.trim();
   const source = chatId === 'web' ? 'web' : 'telegram';
   const t0 = Date.now();
+
+  // Resolve pending confirmation if any
+  const pending = await getPendingTask(chatId, env);
+  if (pending) {
+    const lower = msg.toLowerCase();
+    if (/^(ok|đúng|tạo|yes|y|ừ|uh|chuẩn)$/i.test(lower)) {
+      await clearPendingTask(chatId, env);
+      const tasks = Array.isArray(pending.tasks) ? pending.tasks : [pending.tasks];
+      try {
+        for (const t of tasks) {
+          await createTask(t, env);
+        }
+        let responseText = '';
+        if (tasks.length > 1) {
+          const confirmTexts = tasks.map(t => buildCaptureConfirmation(t));
+          responseText = `✅ Đã tạo ${tasks.length} tasks:\n\n${confirmTexts.join('\n---\n')}`;
+        } else {
+          responseText = buildCaptureConfirmation(tasks[0]);
+        }
+        // Overload warning
+        try {
+          const todayCount = (await queryTasks('today', env))?.length || 0;
+          if (todayCount > 6) responseText += `\n\n⚠️ ${todayCount} tasks rồi đó, thêm nữa tính ở lại đêm à?`;
+        } catch {}
+
+        // Record analytics
+        try {
+          const finalIntent = tasks.length > 1 ? 'CAPTURE_BATCH' : 'CAPTURE';
+          const captureSource = pending.viaAI ? `chat_${source}` : 'direct_parse';
+          const count = tasks.length;
+          const wknd = isWeekendVN();
+          await recordDelta(env, {
+            interactions: 1,
+            sources: { [source]: 1 },
+            is_weekend: wknd ? 1 : 0,
+            is_weekday: wknd ? 0 : 1,
+            intents: { [finalIntent]: 1 },
+            captures: { [captureSource]: count },
+            hourly_capture: { [getHourKey()]: count }
+          });
+        } catch (err) {
+          console.error('Confirm capture analytics error:', err);
+        }
+
+        // Save conversation memory
+        const history = await getConversation(chatId, env);
+        const finalHistory = [...history, { role: 'user', content: msg }, { role: 'assistant', content: responseText }];
+        await saveConversation(chatId, finalHistory, env);
+
+        return buildResult(tasks.length > 1 ? 'CAPTURE_BATCH' : 'CAPTURE', responseText, tasks.length);
+      } catch (err) {
+        console.error('Confirm capture Notion error:', err);
+        const errText = `❌ Lỗi tạo task: ${err.message}`;
+        return buildResult('CLARIFY', errText);
+      }
+    } else if (/^(không|sửa|hủy|no|cancel)$/i.test(lower)) {
+      await clearPendingTask(chatId, env);
+      const responseText = "OK bỏ, gõ lại nhé.";
+      
+      const history = await getConversation(chatId, env);
+      const finalHistory = [...history, { role: 'user', content: msg }, { role: 'assistant', content: responseText }];
+      await saveConversation(chatId, finalHistory, env);
+
+      return buildResult('CLARIFY', responseText);
+    }
+    // If it is anything else, clear pending task and fall through to normal triage flow
+    await clearPendingTask(chatId, env);
+  }
 
   // ═══ PHASE 1: Instant Commands (regex, <1s) ═══════
   const cmd = matchInstantCommand(msg);
@@ -194,6 +186,44 @@ export async function processChat(userMessage, env, chatId = 'web') {
       await recordDelta(env, d);
       return result;
     }
+  }
+
+  // ═══ PHASE 1.5: Deterministic capture ═══════
+  const direct = scoreDirectParse(msg);
+  if (direct && direct.confidence === 'high') {
+    const tasks = Array.isArray(direct.tasks) ? direct.tasks : [direct.tasks];
+    await savePendingTask(chatId, direct.tasks, env, false);
+
+    let responseText = '';
+    if (tasks.length > 1) {
+      responseText = `📝 Xác nhận tạo ${tasks.length} tasks:\n` +
+        tasks.map((t, idx) => `  ${idx + 1}. ${t.title}`).join('\n') +
+        `\n\nĐúng không?`;
+    } else {
+      responseText = buildConfirmCard(tasks[0]);
+    }
+
+    // Save conversation memory
+    const history = await getConversation(chatId, env);
+    const finalHistory = [...history, { role: 'user', content: msg }, { role: 'assistant', content: responseText }];
+    await saveConversation(chatId, finalHistory, env);
+
+    // Record analytics for deterministic capture confirm
+    const wknd = isWeekendVN();
+    await recordDelta(env, {
+      interactions: 1,
+      sources: { [source]: 1 },
+      is_weekend: wknd ? 1 : 0,
+      is_weekday: wknd ? 0 : 1,
+      intents: { CONFIRM_CAPTURE: 1 },
+    });
+
+    return {
+      intent: 'CONFIRM_CAPTURE',
+      response_text: responseText,
+      needs_confirmation: true,
+      pending_action: { type: 'create', data: direct.tasks }
+    };
   }
 
   // ═══ PHASE 2: AI-Powered ═══════
@@ -312,31 +342,50 @@ export async function processChat(userMessage, env, chatId = 'web') {
           if (aiResult.intent === 'CAPTURE_SPLIT' && action.data?.parent && action.data?.subtasks) {
             const parent = action.data.parent;
             if (parent.project && !parent.source) parent.source = PROJECT_SOURCE_MAP[parent.project] || 'EIT';
-            await createTask(parent, env);
-            for (const sub of action.data.subtasks) {
-              await createTask({ ...sub, project: parent.project, urgency: parent.urgency, source: parent.source }, env);
-            }
-            notionResult = true;
-            responseText = `✅ Đã tạo + chia nhỏ:\n📌 ${parent.title}\n📦 ${action.data.subtasks.length} sub-tasks\n\n💡 Gõ "plan" để xem.`;
+            const subtasks = action.data.subtasks.map(sub => ({
+              ...sub,
+              project: parent.project,
+              urgency: parent.urgency,
+              source: parent.source
+            }));
+            const draftData = [parent, ...subtasks];
+            await savePendingTask(chatId, draftData, env, true);
+
+            const responseText = `📝 Xác nhận tạo & chia nhỏ:\n📌 ${parent.title}\n📂 Project: ${parent.project || '?'}\n⏱ Chia thành ${action.data.subtasks.length} sub-tasks\n\nĐúng không?`;
+            
+            const history = await getConversation(chatId, env);
+            const finalHistory = [...history, { role: 'user', content: msg }, { role: 'assistant', content: responseText }];
+            await saveConversation(chatId, finalHistory, env);
+
+            await flushAIAnalytics(env, analytics, 'CONFIRM_CAPTURE');
+
+            return {
+              intent: 'CONFIRM_CAPTURE',
+              response_text: responseText,
+              needs_confirmation: true,
+              pending_action: { type: 'create', data: draftData }
+            };
           } else {
-            notionResult = await createTask(taskData, env);
-            // Check overload
-            let overloadWarning = '';
-            try {
-              const todayCount = (await queryTasks('today', env))?.length || 0;
-              if (todayCount > 6) {
-                overloadWarning = `\n\n⚠️ ${todayCount} tasks rồi đó, thêm nữa tính ở lại đêm à?`;
-              }
-            } catch {}
-            responseText = buildCaptureConfirmation(taskData) + overloadWarning;
+            await savePendingTask(chatId, taskData, env, true);
+            const responseText = buildConfirmCard(taskData);
+
+            const history = await getConversation(chatId, env);
+            const finalHistory = [...history, { role: 'user', content: msg }, { role: 'assistant', content: responseText }];
+            await saveConversation(chatId, finalHistory, env);
+
+            await flushAIAnalytics(env, analytics, 'CONFIRM_CAPTURE');
+
+            return {
+              intent: 'CONFIRM_CAPTURE',
+              response_text: responseText,
+              needs_confirmation: true,
+              pending_action: { type: 'create', data: taskData }
+            };
           }
-          break;
         }
         case 'create_batch': {
-          // Use AI's task data array, or fall back to direct parser
           let batchTasks = [];
 
-          // Try AI's data first
           if (action.data) {
             if (Array.isArray(action.data.tasks)) {
               batchTasks = action.data.tasks;
@@ -345,7 +394,6 @@ export async function processChat(userMessage, env, chatId = 'web') {
             }
           }
 
-          // Fallback: parse from original message
           if (batchTasks.length === 0) {
             const parsed = tryDirectParse(msg);
             if (parsed) batchTasks = Array.isArray(parsed) ? parsed : [parsed];
@@ -366,15 +414,26 @@ export async function processChat(userMessage, env, chatId = 'web') {
             }
             if (!t.urgency) t.urgency = '🟡 Important';
             enrichWithScheduledTime(t, msg);
-            await createTask(t, env);
           }
 
           if (batchTasks.length > 0) {
-            notionResult = true;
-            const confirmTexts = batchTasks.map(t => buildCaptureConfirmation(t));
-            responseText = batchTasks.length > 1
-              ? `✅ Đã tạo ${batchTasks.length} tasks:\n\n${confirmTexts.join('\n---\n')}`
-              : confirmTexts[0];
+            await savePendingTask(chatId, batchTasks, env, true);
+            const responseText = `📝 Xác nhận tạo ${batchTasks.length} tasks:\n` +
+              batchTasks.map((t, idx) => `  ${idx + 1}. ${t.title}`).join('\n') +
+              `\n\nĐúng không?`;
+
+            const history = await getConversation(chatId, env);
+            const finalHistory = [...history, { role: 'user', content: msg }, { role: 'assistant', content: responseText }];
+            await saveConversation(chatId, finalHistory, env);
+
+            await flushAIAnalytics(env, analytics, 'CONFIRM_CAPTURE');
+
+            return {
+              intent: 'CONFIRM_CAPTURE',
+              response_text: responseText,
+              needs_confirmation: true,
+              pending_action: { type: 'create', data: batchTasks }
+            };
           }
           break;
         }
@@ -443,25 +502,36 @@ export async function processChat(userMessage, env, chatId = 'web') {
     if (!notionResult && !isUpdate && !isEdit && !isDelete && /📌|📋/.test(responseText)) {
       const fallbackTask = tryParseCaptureFromAIResponse(responseText, msg);
       if (fallbackTask) {
-        try {
-          // Normalize project
-          if (fallbackTask.project) {
-            const upper = fallbackTask.project.toUpperCase();
-            const validProjects = ['GMA', 'HOSEL', 'SALES', 'EMPULSE', 'KV', 'EDU', 'TEACH', 'LEARN', 'PERSONAL', 'MATERIALS'];
-            if (validProjects.includes(upper)) fallbackTask.project = upper;
-          }
-          if (fallbackTask.project && !fallbackTask.source) {
-            fallbackTask.source = PROJECT_SOURCE_MAP[fallbackTask.project] || 'EIT';
-          }
-          // Default due_date
-          if (!fallbackTask.due_date) {
-            const now = new Date(Date.now() + 7 * 3600000);
-            fallbackTask.due_date = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
-          }
-          enrichWithScheduledTime(fallbackTask, msg);
-          notionResult = await createTask(fallbackTask, env);
-          responseText = buildCaptureConfirmation(fallbackTask);
-        } catch {}
+        // Normalize project
+        if (fallbackTask.project) {
+          const upper = fallbackTask.project.toUpperCase();
+          const validProjects = ['GMA', 'HOSEL', 'SALES', 'EMPULSE', 'KV', 'EDU', 'TEACH', 'LEARN', 'PERSONAL', 'MATERIALS'];
+          if (validProjects.includes(upper)) fallbackTask.project = upper;
+        }
+        if (fallbackTask.project && !fallbackTask.source) {
+          fallbackTask.source = PROJECT_SOURCE_MAP[fallbackTask.project] || 'EIT';
+        }
+        // Default due_date
+        if (!fallbackTask.due_date) {
+          const now = new Date(Date.now() + 7 * 3600000);
+          fallbackTask.due_date = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
+        }
+        enrichWithScheduledTime(fallbackTask, msg);
+
+        await savePendingTask(chatId, fallbackTask, env, true);
+        const confirmText = buildConfirmCard(fallbackTask);
+        const history = await getConversation(chatId, env);
+        const finalHistory = [...history, { role: 'user', content: msg }, { role: 'assistant', content: confirmText }];
+        await saveConversation(chatId, finalHistory, env);
+
+        await flushAIAnalytics(env, analytics, 'CONFIRM_CAPTURE', { aiFailure: true });
+
+        return {
+          intent: 'CONFIRM_CAPTURE',
+          response_text: confirmText,
+          needs_confirmation: true,
+          pending_action: { type: 'create', data: fallbackTask }
+        };
       }
     }
   }
@@ -470,21 +540,29 @@ export async function processChat(userMessage, env, chatId = 'web') {
   if (!notionResult && (aiResult.intent === 'CAPTURE_BATCH' || (aiResult.intent === 'CAPTURE' && !action))) {
     const directResult = tryDirectParse(msg);
     if (directResult) {
-      try {
-        const tasks = Array.isArray(directResult) ? directResult : [directResult];
-        for (const t of tasks) {
-          await createTask(t, env);
-        }
-        notionResult = true;
-        if (tasks.length > 1) {
-          const confirmTexts = tasks.map(t => buildCaptureConfirmation(t));
-          responseText = `✅ Đã tạo ${tasks.length} tasks:\n\n${confirmTexts.join('\n---\n')}`;
-        } else {
-          responseText = buildCaptureConfirmation(tasks[0]);
-        }
-      } catch (err) {
-        console.error('CAPTURE_BATCH fallback error:', err);
+      const tasks = Array.isArray(directResult) ? directResult : [directResult];
+      await savePendingTask(chatId, directResult, env, true);
+      let responseText = '';
+      if (tasks.length > 1) {
+        responseText = `📝 Xác nhận tạo ${tasks.length} tasks:\n` +
+          tasks.map((t, idx) => `  ${idx + 1}. ${t.title}`).join('\n') +
+          `\n\nĐúng không?`;
+      } else {
+        responseText = buildConfirmCard(tasks[0]);
       }
+
+      const history = await getConversation(chatId, env);
+      const finalHistory = [...history, { role: 'user', content: msg }, { role: 'assistant', content: responseText }];
+      await saveConversation(chatId, finalHistory, env);
+
+      await flushAIAnalytics(env, analytics, 'CONFIRM_CAPTURE', { aiFailure: true });
+
+      return {
+        intent: 'CONFIRM_CAPTURE',
+        response_text: responseText,
+        needs_confirmation: true,
+        pending_action: { type: 'create', data: directResult }
+      };
     }
   }
 

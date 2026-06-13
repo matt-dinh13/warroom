@@ -255,3 +255,31 @@ export function buildListResponse(tasks) {
   lines.push('💡 Gõ "done [tên]" hoặc "plan" để focus.');
   return lines.join('\n');
 }
+
+// ─── Capture Confirmation Card ───────────────────────────
+export function buildConfirmCard(d) {
+  let r = `📝 Xác nhận tạo:\n📌 ${d.title || 'Untitled'}`;
+  if (d.project) r += `\n📂 ${d.project}`;
+  if (d.urgency) r += ` | ${d.urgency}`;
+  if (d.estimate) r += `\n⏱ ${d.estimate}p`;
+  if (d.due_date) r += ` | 📅 ${d.due_date}`;
+  if (d.scheduled_time) {
+    const t = d.scheduled_time.split('T')[1] || '';
+    r += `\n📅 Calendar: ${t} ${d.due_date || ''}`;
+  }
+  if (d.assigned_by) r += `\n👤 ${d.assigned_by}`;
+  r += `\n\nĐúng không?`;
+  return r;
+}
+
+// ─── Parked List Response ────────────────────────────────
+export function buildParkedResponse(tasks) {
+  if (!tasks || !tasks.length) return '🅿️ Không có task nào đang để dành.';
+  let r = `🅿️ ${tasks.length} task đang để dành (Parked):\n\n`;
+  tasks.forEach((t, i) => {
+    const p = t.project ? ` [${t.project}]` : '';
+    r += `  ${i + 1}. ${t.title}${p}\n`;
+  });
+  r += `\n💡 Gõ "resume [tên]" để đưa task quay lại plan hôm nay.`;
+  return r;
+}
