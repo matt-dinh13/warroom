@@ -1384,6 +1384,49 @@ Thiết lập trạng thái Parked, cảnh báo auto-defer qua Telegram, tự đ
 
 ---
 
+## 2026-06-17 — v7.0 Planner Engine (P1: Core deterministic)
+
+### Scope
+Execute P1 of PLAN_PLANNER.md: thuật toán scheduler thuần (không LLM) gom task vào timeline giờ-by-giờ, tự park/đẩy task thừa. Reuse confirm-card infra của v6.
+
+### Changes Made
+- `src/planner.js` (mới): pure `buildDayPlan(tasks, opts)` — split anchors/floating, fill estimate đề xuất, score (urgency + deadlineBonus + deferNudge), chọn-để-vừa-sức với must-include guard, layout timeline theo giờ. Exports `getWorkHours/getLunch/getBufferMin/getCapacity`.
+- `src/responses.js`: thêm `buildDayPlanResponse(plan)` — render hour-by-hour + report park/push.
+- `src/notion.js`: thêm `applyDayPlan(plan, env)` — batch writer: selected → Scheduled+DoDate, parked → status Pending, pushed → DoDate tomorrow.
+- `src/commands.js`: 3 instant commands mới — `plan_day` (xếp lịch/lên lịch), `replan` (xếp lại/lên lại), `week_intake` (lịch tuần — placeholder cho P2). Plan lưu pending `{ type:'apply_plan', plan }`.
+- `src/triage.js`: update `getPendingTask` đọc `type:'apply_plan'`. Trong resolve "ok" branch, nếu pending là `apply_plan` → gọi `applyDayPlan` rồi báo "đã xếp N task, park M, đẩy K".
+
+### Technical Decisions
+#### DN: Plan lưu pending cùng shape với capture
+- **Decision:** `{ type:'apply_plan', plan, viaAI:false }` trong `pending:{chatId}` KV.
+- **Reason:** Tận dụng 100% resolve path hiện có (cùng regex `^(ok|...|không|...)$` ở đầu `processChat`). Không cần state machine mới.
+- **Impact:** "ok" sau `xếp lịch` → apply; "không" → clear plan. Flow thống nhất với confirm-capture.
+
+#### DN: Must-include overflow trả về, không auto-park
+- **Decision:** Nếu riêng Fire+deadline≤today > focusCap → return `{ overflow:[...], mustOverflow:true }`, response text báo "bạn quyết".
+- **Reason:** Auto-park việc bắt buộc sẽ phản tác dụng (giấu việc quan trọng). RAIL của plan.
+- **Impact:** Matt phải `sửa [tên]` để giảm estimate hoặc đẩy deadline trước khi `ok` lại.
+
+#### DN: Re-plan skip anchor đã qua (`startFromNow: true`)
+- **Decision:** Khi `xếp lại`, drop anchor có `scheduled` < now-buffer thay vì đặt lại.
+- **Reason:** Họp 9am đã qua không thể dời giờ — chỉ xếp phần còn lại ngày.
+- **Impact:** `replan` thực dụng cho ADHD flow (kế hoạch sáng vỡ → re-plan giữa trưa).
+
+### Verification Results
+| Test | Result | Notes |
+|------|--------|-------|
+| `wrangler deploy --dry-run` | ✅ Pass | Bindings OK, no syntax errors |
+| 4 scenario unit (Node) | ✅ Pass | Office/WFH/replan/overflow đều ra kết quả đúng spec |
+| Real-data render | ✅ Pass | Output giống ví dụ trong PLAN_PLANNER.md mục 7 |
+
+### Notes
+- P2 (week intake qua LLM) chưa làm — `week_intake` command hiện chỉ prompt Matt gõ lịch tuần, chưa parse.
+- P3 (cron morning briefing → planner) chưa làm — `sendMorningBriefing` trong `reminders.js` vẫn flat-list.
+- P4 (energy-aware từ analytics heatmap) chưa làm.
+- Khi deploy cần dogfood vài ngày trước khi kích hoạt P3 (vì P3 sẽ thay đổi format 8am daily).
+
+---
+
 ## Template for Future Entries
 
 ```markdown

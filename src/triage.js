@@ -4,7 +4,7 @@
 // Phase 3: Fallback parsers (when AI returns plain text)
 
 import { callMiniMax } from './minimax.js';
-import { createTask, queryTasks, updateTaskStatus, editTask, archiveTask } from './notion.js';
+import { createTask, queryTasks, updateTaskStatus, editTask, archiveTask, applyDayPlan } from './notion.js';
 import { SYSTEM_PROMPT, PROJECT_SOURCE_MAP } from './prompts.js';
 import { matchInstantCommand, executeInstantCommand } from './commands.js';
 import { getVNContext, buildCaptureConfirmation, buildCompletionResponse, buildConfirmCard } from './responses.js';
@@ -64,6 +64,10 @@ export async function getPendingTask(chatId, env) {
   try {
     const raw = await env.CHAT_MEMORY.get(`pending:${chatId}`, 'json');
     if (!raw) return null;
+    // New shape: { type, tasks, viaAI } or { type:'apply_plan', plan, viaAI }
+    if (raw.type === 'apply_plan') {
+      return raw;
+    }
     if (raw.tasks !== undefined && raw.viaAI !== undefined) {
       return raw;
     }
@@ -104,6 +108,47 @@ export async function processChat(userMessage, env, chatId = 'web') {
     const lower = msg.toLowerCase();
     if (/^(ok|đúng|tạo|yes|y|ừ|uh|chuẩn)$/i.test(lower)) {
       await clearPendingTask(chatId, env);
+      // ─── Day Plan confirmation path ───
+      if (pending.type === 'apply_plan' && pending.plan) {
+        try {
+          const summary = await applyDayPlan(pending.plan, env);
+          const plan = pending.plan;
+          const lines = [];
+          lines.push('✅ Đã chốt lịch ngày ' + (plan.meta?.today || '') + '.');
+          if (summary.selected) lines.push(`📌 Đã xếp ${summary.selected} task vào lịch.`);
+          if (summary.parked)   lines.push(`🅿️ Park ${summary.parked} task (chưa gấp).`);
+          if (summary.pushed)   lines.push(`➡️ Đẩy ${summary.pushed} task sang ngày mai.`);
+          if (summary.errors.length) lines.push(`⚠️ ${summary.errors.length} lỗi khi ghi Notion.`);
+          lines.push('\n💡 Gõ "ok" để xem kế hoạch. Gõ "resume [tên]" để lấy lại task đã park.');
+          const responseText = lines.join('\n');
+
+          // Record analytics
+          try {
+            const wknd = isWeekendVN();
+            await recordDelta(env, {
+              interactions: 1,
+              sources: { [source]: 1 },
+              is_weekend: wknd ? 1 : 0,
+              is_weekday: wknd ? 0 : 1,
+              intents: { DAY_PLAN: 1 },
+              hourly_capture: { [getHourKey()]: 1 },
+            });
+          } catch (err) {
+            console.error('Day plan analytics error:', err);
+          }
+
+          // Save conversation memory
+          const history = await getConversation(chatId, env);
+          const finalHistory = [...history, { role: 'user', content: msg }, { role: 'assistant', content: responseText }];
+          await saveConversation(chatId, finalHistory, env);
+
+          return buildResult('DAY_PLAN', responseText, summary.selected);
+        } catch (err) {
+          console.error('Apply day plan error:', err);
+          return buildResult('CLARIFY', `❌ Lỗi apply plan: ${err.message}`);
+        }
+      }
+      // ─── Capture confirmation path (existing) ───
       const tasks = Array.isArray(pending.tasks) ? pending.tasks : [pending.tasks];
       try {
         for (const t of tasks) {

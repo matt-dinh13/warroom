@@ -1,7 +1,7 @@
 # 🚀 Stratt — Project Context
 
 > File này chứa đủ context để developer mới (hoặc AI agent) tiếp tục phát triển mà không cần hỏi lại.
-> Cập nhật lần cuối: 2026-06-13 (v6.3.1)
+> Cập nhật lần cuối: 2026-06-17 (v7.0 — Planner P1)
 
 
 ---
@@ -40,14 +40,17 @@ User ──→ Board Tab ──→ /api/tasks ───────→├→ not
                        /api/tasks/create   │
                        /api/tasks/update   ↕
                                          KV: CHAT_MEMORY (conversation context)
+                              │
+                              └→ src/planner.js (v7) — buildDayPlan pure scheduler for `xếp lịch`/`xếp lại`
 
 Cron (5 schedules) ─→ reminders.js ─→ Notion query ─→ Telegram message
 
 Cloudflare Worker (src/index.js)
   ├→ Rate Limiter (30 req/min per IP)
   ├→ src/auth.js          — SHA-256 password gate + Secure cookies + Logout
-  ├→ src/commands.js      — Instant regex commands (plan, list, overdue, etc.)
-  ├→ src/triage.js        — Agentic orchestrator + memory + context injection + intent correction + enrichWithScheduledTime()
+  ├→ src/commands.js      — Instant regex commands (plan, list, overdue, xếp lịch, xếp lại, lịch tuần)
+  ├→ src/planner.js       — (v7) Pure day scheduler: buildDayPlan (anchors + scoring + must-include guard + auto-park/push)
+  ├→ src/triage.js        — Agentic orchestrator + memory + context injection + intent correction + enrichWithScheduledTime() + apply_plan resolve
   │    ├→ src/minimax.js    — MiniMax-M2.7 (timeout + retry)
   │    ├→ src/notion.js     — Notion CRUD + pagination + retry-backoff (supports scheduled_time)
   │    ├→ src/prompts.js    — Sarcastic prompt (v5.3) + 13 few-shot examples (incl. time scheduling)
@@ -139,8 +142,9 @@ stratt/  (local dir: warroom/)
 ├── src/
 │   ├── index.js            # Worker entry — routes + rate limiter
 │   ├── auth.js             # SHA-256 auth (login + logout)
-│   ├── commands.js         # Instant regex commands (9 patterns)
+│   ├── commands.js         # Instant regex commands (12 patterns incl. v7 planner)
 │   ├── minimax.js          # MiniMax-M2.7 client (timeout + retry)
+│   ├── planner.js          # (v7) Pure day scheduler — buildDayPlan (no LLM)
 │   ├── notion.js           # Notion CRUD + pagination + retry-backoff
 │   ├── triage.js           # Agentic orchestrator + context injection + intent fix
 │   ├── prompts.js          # Sarcastic prompt v5.2 + 11 few-shot + intent alignment
@@ -194,6 +198,9 @@ stratt/  (local dir: warroom/)
 | `park [name]` | EDIT | `^(?:park\|để dành\|khoan làm)\s+(\S+(?:\s+\S+){0,5})$` |
 | `resume [name]` | EDIT | `^(?:resume\|làm lại\|tiếp tục)\s+(\S+(?:\s+\S+){0,5})$` |
 | `parked` | LIST_TASKS | `^(?:parked\|để dành\|đang park)$` |
+| `xếp lịch` (v7) | DAY_PLAN | `^(?:xếp lịch\|plan ngày\|lên lịch)$/i` |
+| `xếp lại` (v7) | DAY_PLAN | `^(?:xếp lại\|re-?plan\|lên lại)$/i` |
+| `lịch tuần` (v7) | WEEK_INTAKE | `^(?:lịch tuần\|tuần này)$/i` |
 
 All other messages → MiniMax AI fallback.
 
@@ -276,6 +283,7 @@ TELEGRAM_CHAT_ID    — Matt's Telegram chat ID
 | **6.1** | **2026-06-13** | **Phase V6.2 — Parked state: Pending status isolation, weekly digest cron (Monday 8:00), interactive auto-defer prompts (Park/Split/Drop)** |
 | **6.2** | **2026-06-13** | **Phase V6.3 — Notion DB cleanup: auto Block (AM/PM) derivation from scheduled_time, /api/mark-columns-for-deletion endpoint** |
 | **6.3** | **2026-06-13** | **Phase V6 Round 2 Fixes — early return analytics flush, overload warning in resolve path, direct_parse vs AI analytics split** |
+| **7.0** | **2026-06-17** | **Planner Engine P1 (core deterministic): `buildDayPlan` pure scheduler (gems: urgency+deadline+defer scoring, must-include guard, auto-park/push). Instant commands `xếp lịch`/`xếp lại`/`lịch tuần`. `applyDayPlan` batch writer. Reuses v6 confirm-card (ok→apply). 0 LLM in core.** |
 
 
 

@@ -7,7 +7,18 @@ import {
   buildTriageResponse, buildOverdueResponse, buildLoadCheckResponse,
   buildListResponse, buildReportResponse, buildBacklogResponse,
   buildMaterialsResponse, buildCompletionResponse, buildParkedResponse,
+  buildDayPlanResponse,
 } from './responses.js';
+import { buildDayPlan } from './planner.js';
+
+async function savePlanPending(chatId, plan, env) {
+  if (!env.CHAT_MEMORY) return;
+  try {
+    await env.CHAT_MEMORY.put(`pending:${chatId}`, JSON.stringify({ type: 'apply_plan', plan, viaAI: false }), { expirationTtl: 600 });
+  } catch (err) {
+    console.error('savePlanPending error:', err);
+  }
+}
 
 // ─── Safe Commands (anchored ^...$) ─────────────────────
 const SAFE_COMMANDS = [
@@ -25,6 +36,10 @@ const SAFE_COMMANDS = [
   { type: 'park',        regex: /^(?:park|để dành|khoan làm)\s+(\S+(?:\s+\S+){0,5})$/i },
   { type: 'resume',      regex: /^(?:resume|làm lại|tiếp tục)\s+(\S+(?:\s+\S+){0,5})$/i },
   { type: 'parked_list', regex: /^(?:parked|để dành|đang park)$/i },
+  // Planner v7 — daily plan / re-plan / week intake
+  { type: 'plan_day',    regex: /^(?:xếp lịch|plan ngày|lên lịch)$/i },
+  { type: 'replan',      regex: /^(?:xếp lại|re-?plan|lên lại)$/i },
+  { type: 'week_intake', regex: /^(?:lịch tuần|tuần này)$/i },
 ];
 
 /**
@@ -123,6 +138,38 @@ export async function executeInstantCommand(cmd, env, chatId, getLastPlan, saveL
     case 'parked_list': {
       const tasks = await queryTasks('parked', env);
       return buildResult('LIST_TASKS', buildParkedResponse(tasks), tasks.length);
+    }
+    case 'plan_day': {
+      const tasks = await queryTasks('all_active', env);
+      const chronic = await getChronicDefers(env, 3);
+      const deferMap = new Map(chronic.map(c => [c.id, c.count]));
+      const plan = buildDayPlan(tasks, { deferMap });
+      await savePlanPending(chatId, plan, env);
+      return {
+        ...buildResult('DAY_PLAN', buildDayPlanResponse(plan), plan.selected.length),
+        needs_confirmation: true,
+        pending_action: { type: 'apply_plan', data: plan },
+      };
+    }
+    case 'replan': {
+      const tasks = await queryTasks('all_active', env);
+      const chronic = await getChronicDefers(env, 3);
+      const deferMap = new Map(chronic.map(c => [c.id, c.count]));
+      const now = new Date(Date.now() + 7 * 3600000);
+      const fromTime = { hour: now.getUTCHours(), min: now.getUTCMinutes() };
+      const plan = buildDayPlan(tasks, { deferMap, startFromNow: true, fromTime });
+      await savePlanPending(chatId, plan, env);
+      return {
+        ...buildResult('DAY_PLAN', buildDayPlanResponse(plan), plan.selected.length),
+        needs_confirmation: true,
+        pending_action: { type: 'apply_plan', data: plan },
+      };
+    }
+    case 'week_intake': {
+      // P2 — week intake via LLM. For v1 just prompt Matt to type fixed items.
+      return buildResult('WEEK_INTAKE',
+        '📅 Tuần này có gì cố định? (họp, hẹn, ngày WFH)\n' +
+        'Gõ tự nhiên, ví dụ: "T3 14h họp GMA, T5 WFH cả ngày".');
     }
     default:
       return null;

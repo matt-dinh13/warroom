@@ -272,6 +272,87 @@ export function buildConfirmCard(d) {
   return r;
 }
 
+// ─── Day Plan Response (Planner v7) ───────────────────────
+const URGENCY_ICON = {
+  '🔴 Fire': '🔴',
+  '🟡 Important': '🟡',
+  '🟢 Wait': '🟢',
+  '⚪ Someday': '⚪',
+};
+
+function vnDayName(d) {
+  return ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][d.getDay()];
+}
+
+export function buildDayPlanResponse(plan, { showConfirmPrompt = true } = {}) {
+  const { meta, timeline, selected, parked, pushed, overflow } = plan;
+  if (!meta) return '❌ Plan rỗng.';
+
+  const dayName = vnDayName(new Date(meta.today + 'T00:00:00Z'));
+  const dayTypeLabel = meta.dayType === 'office' ? 'Office' : meta.dayType === 'wfh' ? 'WFH' : 'Weekend';
+  const dayIcon = meta.dayType === 'office' ? '🏢' : meta.dayType === 'wfh' ? '🏠' : '🌿';
+  const focusH = (meta.focusCap / 60).toFixed(1);
+  const usedH = (meta.used / 60).toFixed(1);
+
+  let r = `📅 ${dayName} ${meta.today.slice(5).replace('-', '/')} — ${dayIcon} ${dayTypeLabel} (focus ~${focusH}h)\n\n`;
+
+  if (timeline.length === 0 && selected.length === 0) {
+    r += `📭 Hôm nay không có gì để làm.\n`;
+  } else {
+    for (const item of timeline) {
+      const t = item.task || {};
+      const ic = URGENCY_ICON[t.urgency] || '🟡';
+      const est = t.estimate ? `${t.estimate}p` : '?p';
+      const isAnchor = item.kind === 'anchor';
+      const icon = isAnchor ? '📌' : ic;
+      const anchorTag = isAnchor ? ' [Họp]' : '';
+      const sugTag = t.estimate_suggested && !isAnchor ? ' · đề xuất' : '';
+      r += `🕒 ${item.time}  ${icon} ${t.title || 'Untitled'}${anchorTag} (${est}${sugTag})\n`;
+    }
+    r += '\n';
+  }
+
+  if (selected.length || timeline.length) {
+    r += `✅ Khít ${usedH}h / ${focusH}h`;
+    if (selected.length) r += ` · ${selected.length} task`;
+    r += '\n';
+  }
+
+  if (showConfirmPrompt) {
+    r += `\nGõ "ok" để chốt lịch.\n`;
+  }
+
+  if (parked.length) {
+    r += `\n🅿️ Auto-park ${parked.length} (chưa gấp):\n`;
+    parked.slice(0, 6).forEach(p => {
+      r += `  • ${p.urgency || '🟡'} ${p.title} — gõ "resume ${p.title}" để lấy lại\n`;
+    });
+    if (parked.length > 6) r += `  ... +${parked.length - 6} nữa\n`;
+  }
+
+  if (pushed.length) {
+    r += `\n➡️ Đẩy mai ${pushed.length}:\n`;
+    pushed.slice(0, 6).forEach(p => {
+      r += `  • ${p.urgency || '🟡'} ${p.title}\n`;
+    });
+    if (pushed.length > 6) r += `  ... +${pushed.length - 6} nữa\n`;
+  }
+
+  if (overflow.length) {
+    r += `\n⚠️ Việc bắt buộc đã vượt giờ (~${usedH}h/${focusH}h). Cần cắt/đẩy gì đó — bạn quyết:\n`;
+    overflow.forEach(o => {
+      r += `  • ${o.urgency || '🟡'} ${o.title}\n`;
+    });
+  }
+
+  if (meta.mustOverflow) {
+    r = r.replace('Gõ "ok" để chốt lịch.\n', '');
+    r += `\n❌ Không auto-park việc bắt buộc. Gõ "ok" để chốt phần vừa sức, hoặc gõ "sửa [tên]" để giảm estimate.\n`;
+  }
+
+  return r.trim();
+}
+
 // ─── Parked List Response ────────────────────────────────
 export function buildParkedResponse(tasks) {
   if (!tasks || !tasks.length) return '🅿️ Không có task nào đang để dành.';

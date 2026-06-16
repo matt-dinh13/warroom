@@ -916,6 +916,88 @@ export async function getTaskById(pageId, env) {
 }
 
 /**
+ * Apply a day plan (selected/parked/pushed) to Notion in one batch.
+ * Returns summary { selected: n, parked: n, pushed: n, errors: [...] }.
+ */
+export async function applyDayPlan(plan, env) {
+  const summary = { selected: 0, parked: 0, pushed: 0, errors: [] };
+
+  const buildHm = (item) => {
+    // item.time is "HH:MM" string from planner
+    return item.time && /^\d{2}:\d{2}$/.test(item.time) ? item.time : null;
+  };
+
+  // ── selected: write Scheduled + Do Date
+  for (const item of plan.timeline || []) {
+    if (item.kind !== 'planned' || !item.task || !item.task.id) continue;
+    const hm = buildHm(item);
+    if (!hm) continue;
+    const date = plan.meta?.today;
+    if (!date) continue;
+    const scheduledISO = `${date}T${hm}:00+07:00`;
+    try {
+      const res = await fetchWithRetry(`${NOTION_BASE}/pages/${item.task.id}`, {
+        method: 'PATCH',
+        headers: notionHeaders(env.NOTION_API_KEY),
+        body: JSON.stringify({
+          properties: {
+            'Scheduled': { date: { start: formatScheduledTime(scheduledISO) } },
+            'Do Date': { date: { start: date } },
+          },
+        }),
+      });
+      if (res.ok) summary.selected++;
+      else summary.errors.push(`selected:${item.task.id}: ${res.status}`);
+    } catch (err) {
+      summary.errors.push(`selected:${item.task.id}: ${err.message}`);
+    }
+  }
+
+  // ── parked: status = Pending / Wait for approved
+  for (const t of plan.parked || []) {
+    if (!t.id) continue;
+    try {
+      const res = await fetchWithRetry(`${NOTION_BASE}/pages/${t.id}`, {
+        method: 'PATCH',
+        headers: notionHeaders(env.NOTION_API_KEY),
+        body: JSON.stringify({
+          properties: { 'State': { status: { name: 'Pending / Wait for approved' } } },
+        }),
+      });
+      if (res.ok) summary.parked++;
+      else summary.errors.push(`parked:${t.id}: ${res.status}`);
+    } catch (err) {
+      summary.errors.push(`parked:${t.id}: ${err.message}`);
+    }
+  }
+
+  // ── pushed: PATCH Do Date
+  for (const t of plan.pushed || []) {
+    if (!t.id || !t.to_date) continue;
+    try {
+      const res = await fetchWithRetry(`${NOTION_BASE}/pages/${t.id}`, {
+        method: 'PATCH',
+        headers: notionHeaders(env.NOTION_API_KEY),
+        body: JSON.stringify({
+          properties: { 'Do Date': { date: { start: t.to_date } } },
+        }),
+      });
+      if (res.ok) summary.pushed++;
+      else summary.errors.push(`pushed:${t.id}: ${res.status}`);
+    } catch (err) {
+      summary.errors.push(`pushed:${t.id}: ${err.message}`);
+    }
+  }
+
+  if (summary.selected || summary.parked || summary.pushed) {
+    await invalidateCache(env, INVALIDATION_SCOPES.schedule);
+    await invalidateCache(env, INVALIDATION_SCOPES.status);
+  }
+
+  return summary;
+}
+
+/**
  * Flags cells in specific Notion database columns with sentinel values ("DELETE ME") for manual deletion.
  */
 export async function markColumnsForDeletion(columns, env) {
