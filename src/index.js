@@ -7,6 +7,36 @@ import { handleTelegramWebhook, setTelegramWebhook } from './telegram.js';
 import { handleScheduled } from './reminders.js';
 import { backfillDoDate, queryTasks, createTask, updateTaskStatusById, updateTaskSchedule, markColumnsForDeletion } from './notion.js';
 import { recordDelta, getSummary, buildStatsReport, getChronicDefers, clearDeferCount } from './analytics.js';
+import { buildDayPlan } from './planner.js';
+
+// ─── Default UI version (PLAN_UI mục 8) ─────────────────────
+// 'v1' = legacy UI (rollback safe). 'v2' = new Today-first UI.
+// Matt can flip this + deploy to switch. /v1 and /v2 always available.
+const DEFAULT_UI = 'v1';
+
+// ─── Versioned asset resolver (PLAN_UI_FIXES §F1.1) ────────────
+// Fetch dạng thư mục canonical ('/v2/', '/') thay vì tự chèn index.html
+// để tránh Cloudflare Assets canonical-hoá → 307 → loop.
+async function serveVersionedAsset(request, url, env) {
+  const path = url.pathname;
+  const get = (p) => env.ASSETS.fetch(new Request(new URL(p, url), request));
+
+  // v2 page → serve v2 dir index qua dạng canonical '/v2/' (tránh redirect index.html)
+  if (path === '/v2' || path === '/v2/') return get('/v2/');
+  // v2 sub-asset (/v2/app.js, /v2/style.css) → giữ nguyên
+  if (path.startsWith('/v2/')) return env.ASSETS.fetch(request);
+
+  // v1 page → v1 nằm ở public root → serve qua '/' (canonical, không 307)
+  if (path === '/v1' || path === '/v1/') return get('/');
+  // v1 sub-asset (/v1/style.css) → bỏ prefix /v1, lấy từ root
+  if (path.startsWith('/v1/')) return get(path.slice(3) || '/');
+
+  // root → theo DEFAULT_UI (dùng dạng thư mục canonical)
+  if (path === '/' || path === '') return get(DEFAULT_UI === 'v2' ? '/v2/' : '/');
+
+  // còn lại = asset dùng chung (css/js/manifest/icon) → giữ nguyên
+  return env.ASSETS.fetch(request);
+}
 
 // ─── Security: Never leak secrets in any response ───────────
 const SECRET_KEYS = ['MINIMAX_API_KEY', 'NOTION_API_KEY', 'NOTION_TASKS_DB_ID', 'NOTION_DAILY_DB_ID', 'APP_PASSWORD', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'];
@@ -333,6 +363,31 @@ export default {
           );
         }
 
+        // GET /api/today?replan=1 — Day plan from Planner engine (v7)
+        if (path === '/api/today' && request.method === 'GET') {
+          if (!(await isAuthenticated(request, env))) {
+            return new Response(
+              JSON.stringify({ error: 'Unauthorized' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+          const tasks = await queryTasks('all_active', env);
+          const chronic = await getChronicDefers(env, 3);
+          const deferMap = new Map(chronic.map(c => [c.id, c.count]));
+          const isReplan = url.searchParams.get('replan') === '1';
+          const opts = { deferMap };
+          if (isReplan) {
+            const now = new Date(Date.now() + 7 * 3600000);
+            opts.startFromNow = true;
+            opts.fromTime = { hour: now.getUTCHours(), min: now.getUTCMinutes() };
+          }
+          const plan = buildDayPlan(tasks, opts);
+          return new Response(
+            JSON.stringify({ plan, replan: isReplan, generated_at: new Date().toISOString() }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
         // POST /api/calendar/schedule — Set scheduled time for a task
         if (path === '/api/calendar/schedule' && request.method === 'POST') {
           if (!(await isAuthenticated(request, env))) {
@@ -449,8 +504,10 @@ export default {
       }
     }
 
-    // ─── Static Assets (handled by Cloudflare) ─────────
-    return env.ASSETS.fetch(request);
+    // ─── Static Assets with UI versioning (PLAN_UI mục 8) ─────
+    // /v1/* → legacy UI (rollback). /v2/* → new Today-first UI.
+    // /     → DEFAULT_UI version. /<file> → DEFAULT_UI's file.
+    return serveVersionedAsset(request, url, env);
   },
 
   // ─── Cron Triggers (auto-reminders via Telegram) ──────

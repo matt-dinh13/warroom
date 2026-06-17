@@ -1427,6 +1427,145 @@ Execute P1 of PLAN_PLANNER.md: thuật toán scheduler thuần (không LLM) gom 
 
 ---
 
+## 2026-06-17 — v2.0 UI Pass: Today-first + parallel versioning
+
+### Scope
+Execute PLAN_UI.md mục 1 (Today tab) + 5 (lỗi nhỏ PWA icon). Tạo UI v2 song song v1 theo cơ chế versioning an toàn.
+
+### Changes Made
+- `src/index.js`: thêm `DEFAULT_UI='v1'` + `serveVersionedAsset()` — `/v2`/`/v2/*` serve `public/v2/*`, `/v1`/`/v1/*` serve `public/*` (legacy), `/` theo `DEFAULT_UI`.
+- `src/index.js`: thêm `GET /api/today[?replan=1]` trả `{ plan, replan, generated_at }` từ `buildDayPlan`.
+- `public/v2/index.html` (mới): 3 tab (Hôm nay / Chat / Board) với Hôm nay làm default. Auth gate + theme toggle.
+- `public/v2/app.js` (mới): render Today view — next-action card (1 task to nhất), timeline giờ-by-giờ, footer progress + nút "Xếp lại lịch"/"🔄", overflow banner (parked/pushed). Actions: ✅ Xong → `/api/tasks/update` Completed, ⏭ Để sau → `do_date:tomorrow`. Auto-apply confirm-card khi gõ "xếp lịch".
+- `public/v2/style.css` (mới): `@import /style.css` + tokens light mode override + Today card/timeline/footer/board-lite styles. Tái dùng 100% design tokens (Phong Thủy navy/jade/coral/amber).
+- `public/v2/app.js` board-lite: hiện top 20 tasks + link "mở v1" — không full kanban (đó là việc mục 2, làm sau).
+- `public/icon-192.png` + `public/icon-512.png`: 0 byte → 1902/8080 byte PNG thật (navy gradient + 🚀 emoji).
+- `public/v1/`, `public/index.html`, `public/app.js`, `public/style.css`: **KHÔNG ĐỤNG** (v1 vẫn serve từ `/v1` và `/` khi `DEFAULT_UI='v1'`).
+
+### Technical Decisions
+#### DN: Versioning qua path prefix, không qua cookie/header
+- **Decision:** `/v1/...` và `/v2/...` luôn serve đúng version. `/` chỉ serve theo `DEFAULT_UI`.
+- **Reason:** Matt có thể mở song song 2 tab (v1 vs v2) để so sánh. Rollback = đổi 1 dòng + `wrangler deploy`, ~30s.
+- **Impact:** localStorage `stratt_v2_*` namespace riêng (không đụng `stratt_*` của v1) tránh xung đột khi flip qua lại.
+
+#### DN: Today view pull từ `/api/today` (read-only), không commit
+- **Decision:** Frontend chỉ GET plan. Actions (Xong / Để sau) gọi `/api/tasks/update` trực tiếp, KHÔNG qua `applyDayPlan`.
+- **Reason:** Khi Matt mở app, "Xong" là việc thường — không cần confirm cả plan. `applyDayPlan` (commit park/push) chỉ chạy khi Matt gõ "xếp lịch" rồi "ok" (vẫn qua chat path cũ).
+- **Impact:** Tránh ô nhiễm `apply_plan` pending mỗi lần Matt bấm Xong trên UI.
+
+#### DN: ✅ Xong chỉ update local view, KHÔNG refetch Notion
+- **Decision:** Sau khi POST `/api/tasks/update` Completed, add taskId vào `doneTaskIds` Set + re-render từ `currentPlan` cache.
+- **Reason:** Re-fetch Notion = 1-2s latency. Local Set = tức thì.
+- **Impact:** "Bấm Xong" cảm giác instant. Bấm 🔄 refresh thì re-fetch thật.
+
+### Verification Results
+| Test | Result | Notes |
+|------|--------|-------|
+| `wrangler deploy --dry-run` | ✅ Pass | 10 asset files (v1 + v2 + 2 icons), no errors |
+| v1 files untouched | ✅ Pass | mtime vẫn 06-08/06-13 |
+| PWA icons real PNG | ✅ Pass | `file` reports valid PNG 192x192 / 512x512 |
+
+### Notes
+- Chưa ship: mục 2 (hạ Board), mục 3 (lật Calendar), mục 4 (estimate inline edit) — làm sau khi dogfood Today.
+- Pending column nhãn "⏳ Pending" → "🅿️ Để dành" CHƯA sửa (là ở v1 board; mục 5 nói "tùy chọn"). v2 board-lite không có cột Pending nên không liên quan.
+- `/v2` link: Matt truy cập `https://<worker>/v2` để dùng thử. Bản chính (`/`) vẫn là v1 cho đến khi flip `DEFAULT_UI='v2'`.
+
+---
+
+## 2026-06-17 — v2.0 UI Fixes Round (sau TEST_PLAN_UI report)
+
+### Scope
+Execute PLAN_UI_FIXES.md: 3 fix gọn (F1 routing, F2 capture tại chỗ v2, F3 nhãn Pending). Gác N1/N4/E1/E2/N4 theo §4.
+
+### Changes Made
+- `wrangler.toml`: thêm `binding = "ASSETS"` + `run_worker_first = true` vào `[assets]`. Fix BLOCKER `/v1` → 500 (`env.ASSETS` undefined) + cho phép `serveVersionedAsset` đánh chặn `/`, `/v1`, `/v2`.
+- `public/v2/index.html`: thay `#chat-view` stub bằng chat input thật (textarea + send button + message area, port từ v1). Thêm nút `+` (`#btn-capture`) ở header để nhảy sang tab Chat.
+- `public/v2/app.js`: port nguyên `sendChat`/`addMessage`/`addConfirmMessage`/`formatMessage`/`scrollToBottom`/`autoResize` từ v1. Confirm-card có 2 nút ✅Tạo / ✏️Sửa (gõ "hủy" để xoá nháp). Sau mỗi chat action → auto-refresh Today (background) để timeline luôn đúng.
+- `public/v2/style.css`: thêm styles cho `.chat-messages`, `.message`, `.message-content`, `.chat-input-area`, `#chat-input`, `.send-btn` (reusing v1 tokens).
+- `public/index.html` (v1 board): đổi nhãn cột `data-status="Pending"` từ "⏳ Pending" → "🅿️ Để dành". `data-status` (filter key) giữ nguyên — chỉ đổi display label.
+
+### Technical Decisions
+#### DN: F1 chỉ cần 3 dòng wrangler.toml, không đụng code
+- **Decision:** Sửa config, không refactor `serveVersionedAsset`.
+- **Reason:** Code `serveVersionedAsset` đã đúng — chỉ thiếu `binding='ASSETS'` để `env.ASSETS` tồn tại, và `run_worker_first=true` để worker chạy trước assets.
+- **Impact:** 30 giây sửa 1 file config, không cần test routing logic (đã test 9/9 case pass với Node script).
+
+#### DN: F2 port "nguyên" từ v1, không viết lại
+- **Decision:** Copy nguyên các hàm `sendChat/addMessage/addConfirmMessage/formatMessage` từ `public/app.js` sang `public/v2/app.js`.
+- **Reason:** V1 đã chạy tốt qua nhiều round. Re-test = lãng phí. Tái dụng cùng endpoint `/api/chat` = đảm bảo UX đồng nhất v1↔v2.
+- **Impact:** v2 chat dùng được ngay, không cần smoke test mới.
+
+#### DN: Sau chat action, refresh Today im lặng
+- **Decision:** Sau `sendChat` (trừ loading error), gọi `loadToday()` ngầm nếu `currentPlan` đã có.
+- **Reason:** Sau khi tạo task mới → cần xuất hiện trong Today. Sau khi complete → cần ẩn đi. Nếu không refresh thì Matt phải bấm 🔄 tay.
+- **Impact:** Trải nghiệm "thêm task → quay lại Today → thấy ngay" liền mạch.
+
+### Verification Results
+| Test | Result | Notes |
+|------|--------|-------|
+| `wrangler deploy --dry-run` | ✅ Pass | `env.ASSETS` binding hiện trong output |
+| Routing logic (Node) | ✅ 9/9 | `/v1` / `/v2` / `/` / `/manifest.json` đều route đúng cả 2 mode |
+| JS syntax (`node --check`) | ✅ Pass | Cả v1 và v2 |
+| HTML/JS ID match | ✅ 32/32 | Mọi `getElementById` trong v2 đều có id tương ứng trong HTML |
+
+### Notes
+- N1 (bottom nav), N4 (Calendar trong v2), E1/E2 (estimate inline edit) — gác theo §4.
+- Sau deploy, Matt test ở `/v2`. Nếu OK → flip `DEFAULT_UI='v2'` + `wrangler deploy`. Nếu fail → set lại `'v1'`.
+- Tất cả 6 file đụng: `wrangler.toml`, `public/index.html` (chỉ 1 dòng label), `public/v2/index.html`, `public/v2/app.js`, `public/v2/style.css`, `auditlog.md`.
+
+---
+
+## 2026-06-17 — v2.0.2 UI Fixes Round 2: F1.1 redirect loop
+
+### Scope
+Execute PLAN_UI_FIXES.md §F1.1 (BLOCKER round 2): sửa vòng lặp redirect 307 trong `serveVersionedAsset`. F2/F3 đã làm từ round trước, xác nhận còn nguyên.
+
+### Changes Made
+- `src/index.js`: thay nguyên hàm `serveVersionedAsset` bằng bản canonical-path. Fetch dạng thư mục (`/v2/`, `/`) thay vì tự chèn `/index.html` → tránh Cloudflare Assets canonical-hoá trả 307.
+- `src/index.js`: giữ nguyên `wrangler.toml` config (`binding="ASSETS"` + `run_worker_first=true` + `html_handling` mặc định).
+- (F2 xác nhận) `public/v2/app.js` đã có sẵn `sendChat`/`addMessage`/`addConfirmMessage`/`formatMessage` + `#btn-capture`. `public/v2/index.html` đã có chat input area. Không cần sửa.
+- (F3 xác nhận) `public/index.html` cột Pending đã là "🅿️ Để dành" từ round trước. Không cần sửa.
+
+### Technical Decisions
+#### DN: Canonical-path fetch thay vì tự chèn index.html
+- **Decision:** `env.ASSETS.fetch('/v2/')` thay vì `env.ASSETS.fetch('/v2/index.html')`.
+- **Reason:** Cloudflare Assets với `html_handling` mặc định canonical-hoá `/index.html` → trả 307 về `/v2/`. Khi worker rewrite `/v2/` → `/v2/index.html` rồi Assets trả 307 về `/v2/` → lặp. Trailing-slash `/v2/` là canonical → Assets serve thẳng 200 không redirect.
+- **Impact:** Hết loop. Code ngắn hơn, không cần đổi config `html_handling`.
+
+#### DN: F2 dùng nguyên port từ v1 thay vì viết lại
+- **Decision:** (Round trước) Port nguyên `sendChat/addMessage/addConfirmMessage/formatMessage` từ `public/app.js` (v1) sang `public/v2/app.js` (v2). Endpoint y nguyên `/api/chat`.
+- **Reason:** V1 đã chạy ổn qua nhiều round. Tái dụng = đảm bảo parity UX, không cần smoke test mới.
+- **Impact:** F2 acceptance (gõ "tạo task" → confirm → ok) chạy y hệt v1, không cần thay đổi gì.
+
+#### DN: DEFAULT_UI flip test = 2 chiều ok
+- **Decision:** Test tự động flip `'v1' → 'v2' → 'v1'` qua wrangler dev.
+- **Reason:** User yêu cầu "đổi DEFAULT_UI 2 chiều → / ra đúng bản".
+- **Impact:** Verified: khi `DEFAULT_UI='v2'`, `/` body chứa `Hôm nay`+`version-badge` (v2), `/v1/` vẫn ra v1. Rollback = đổi 1 dòng + deploy.
+
+### Verification Results
+| Test | Result | Notes |
+|------|--------|-------|
+| `wrangler deploy --dry-run` | ✅ Pass | `env.ASSETS` binding OK |
+| Routing logic (Node simulation) | ✅ 18/18 | Mọi path canonical, không `/index.html` rewrite |
+| `wrangler dev` real HTTP (port 8790) | ✅ 6/6 200, 0 Location header | `/v2 /v2/ /v1 /v1/ / /api/health` đều 200 thẳng |
+| Body sanity v2 | ✅ | `/v2/` chứa `Hôm nay` + `version-badge` + `tab-today` |
+| Body sanity v1 | ✅ | `/` (default=v1) chứa `Stratt` + `tab-btn` |
+| Body sanity v1 (khi default=v2) | ✅ | `/v1/` chứa `tab-chat` (vẫn v1) |
+| `DEFAULT_UI='v2'` flip | ✅ | `/` body chứa `Hôm nay` (v2) |
+| `DEFAULT_UI='v1'` revert | ✅ | Đã revert file, `grep` xác nhận |
+| `/api/health` | ✅ 200 JSON | `{"status":"ok",...}` |
+| `/api/today` no-auth | ✅ 401 | `{"error":"Unauthorized"}` — route tồn tại + auth check work |
+| F2 capture-at-place | ✅ Pass | `sendChat`/`addConfirmMessage`/`formatMessage`/`#btn-capture` đã có ở v2 |
+| F3 Pending label | ✅ Pass | `column-title` vẫn là "🅿️ Để dành" |
+
+### Notes
+- F1.1 là fix gốc rễ của BLOCKER round 2: phải fetch canonical, không tự chèn `index.html`.
+- F2/F3 không cần đụng lại — vẫn nguyên từ round trước, đã verify còn đúng.
+- Sau deploy, Matt có thể dùng `/v2` ngay. Rollback `/v1` cũng ok.
+- `DEFAULT_UI` đang là `'v1'` — Matt flip sang `'v2'` chỉ khi đã dogfood Today xong.
+
+---
+
 ## Template for Future Entries
 
 ```markdown

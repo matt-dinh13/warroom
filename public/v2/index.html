@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="description" content="Stratt v2 — Today-first UI">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" "black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Stratt">
+  <meta name="theme-color" content="#0a0a1a">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <title>🚀 Stratt · Hôm nay</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/v2/style.css">
+</head>
+<body>
+  <!-- ═══ PASSWORD GATE ═══ -->
+  <div id="auth-screen" class="screen active">
+    <div class="auth-container">
+      <div class="auth-logo">
+        <span class="logo-icon">🚀</span>
+        <h1>STRATT</h1>
+        <p class="auth-subtitle">Mission Command · v2</p>
+      </div>
+      <form id="auth-form" class="auth-form">
+        <div class="input-group">
+          <input
+            type="password"
+            id="auth-password"
+            placeholder="Enter password..."
+            autocomplete="off"
+            data-lpignore="true"
+            data-1p-ignore
+            readonly
+            onfocus="this.removeAttribute('readonly')"
+            required
+          >
+          <button type="submit" id="auth-submit">
+            <span class="btn-text">ACCESS</span>
+            <span class="btn-loader" hidden></span>
+          </button>
+        </div>
+        <p id="auth-error" class="auth-error" hidden>Sai mật khẩu</p>
+      </form>
+    </div>
+    <div class="auth-particles"></div>
+  </div>
+
+  <!-- ═══ MAIN APP ═══ -->
+  <div id="app-screen" class="screen">
+    <header class="app-header">
+      <div class="header-left">
+        <span class="header-icon">🚀</span>
+        <h1>Stratt</h1>
+        <span class="version-badge">v2</span>
+      </div>
+      <div class="header-tabs">
+        <button class="tab-btn active" data-tab="today" id="tab-today">⭐ Hôm nay</button>
+        <button class="tab-btn" data-tab="chat" id="tab-chat">💬 Chat</button>
+        <button class="tab-btn" data-tab="board" id="tab-board">📋 Board</button>
+      </div>
+      <div class="header-right">
+        <span class="header-time" id="header-time"></span>
+        <button class="icon-btn" id="btn-capture" title="Add task">+</button>
+        <button class="icon-btn" id="btn-theme" title="Toggle light/dark">🌙</button>
+        <button class="icon-btn" id="btn-logout" title="Logout">🚪</button>
+      </div>
+    </header>
+
+    <!-- ═══ TODAY TAB (default) ═══ -->
+    <div id="today-view" class="tab-view active">
+      <div class="today-loading" id="today-loading">Đang xếp lịch…</div>
+      <div class="today-empty" id="today-empty" hidden>
+        <div class="today-empty-icon">🧠</div>
+        <p>Chưa có kế hoạch hôm nay.</p>
+        <button class="primary-btn" id="btn-plan-now">🧠 Xếp lịch hôm nay</button>
+        <p class="today-empty-hint">Hoặc gõ "tạo task…" trong Chat.</p>
+      </div>
+      <div class="today-content" id="today-content" hidden>
+        <!-- Header strip -->
+        <div class="today-strip">
+          <div class="today-date" id="today-date">—</div>
+          <div class="today-daytype" id="today-daytype">—</div>
+        </div>
+
+        <!-- Next-action card (the whole point of this UI) -->
+        <section class="next-card" id="next-card">
+          <div class="next-label">▶ VIỆC TIẾP THEO</div>
+          <div class="next-title" id="next-title">—</div>
+          <div class="next-meta" id="next-meta">—</div>
+          <div class="next-actions">
+            <button class="primary-btn" id="btn-next-done">✅ Xong</button>
+            <button class="secondary-btn" id="btn-next-skip">⏭ Để sau</button>
+          </div>
+        </section>
+
+        <!-- Timeline -->
+        <section class="timeline-section">
+          <div class="section-label">Lịch hôm nay</div>
+          <div class="timeline" id="today-timeline"></div>
+        </section>
+
+        <!-- Footer summary + actions -->
+        <section class="today-footer">
+          <div class="today-progress" id="today-progress">—</div>
+          <div class="today-actions">
+            <button class="secondary-btn" id="btn-replan">🧠 Xếp lại lịch</button>
+            <button class="secondary-btn" id="btn-refresh-today">🔄</button>
+          </div>
+        </section>
+
+        <!-- Parked/Pushed banner (only if any) -->
+        <section class="overflow-banner" id="overflow-banner" hidden>
+          <div class="overflow-text" id="overflow-text">—</div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ═══ CHAT TAB ═══ -->
+    <div id="chat-view" class="tab-view">
+      <main class="chat-messages" id="chat-messages">
+        <div class="message bot">
+          <div class="message-avatar">🤖</div>
+          <div class="message-content">
+            <p>Chào Matt! 👋 Gõ task để capture. Lịch sử chat đầy đủ ở <a href="/v1" target="_blank">v1</a> — v2 lean hơn, chỉ giữ tab này để thêm task tại chỗ.</p>
+          </div>
+        </div>
+      </main>
+      <form class="chat-input-area" id="chat-form">
+        <div class="input-wrapper">
+          <textarea
+            id="chat-input"
+            placeholder="Gõ task, command, hoặc link..."
+            rows="1"
+            maxlength="2000"
+          ></textarea>
+          <button type="submit" id="chat-submit" class="send-btn" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+            </svg>
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- ═══ BOARD TAB (lite — for overview) ═══ -->
+    <div id="board-view" class="tab-view">
+      <div class="board-lite-loading" id="board-lite-loading">Đang tải board…</div>
+      <div class="board-lite" id="board-lite"></div>
+      <p class="board-lite-hint">Board đầy đủ: <a href="/v1" target="_blank">v1</a></p>
+    </div>
+  </div>
+
+  <script src="/v2/app.js"></script>
+</body>
+</html>

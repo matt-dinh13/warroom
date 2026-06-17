@@ -1,7 +1,7 @@
 # 🚀 Stratt — Project Context
 
 > File này chứa đủ context để developer mới (hoặc AI agent) tiếp tục phát triển mà không cần hỏi lại.
-> Cập nhật lần cuối: 2026-06-17 (v7.0 — Planner P1)
+> Cập nhật lần cuối: 2026-06-17 (v2.0 UI — Today-first + parallel versioning)
 
 
 ---
@@ -153,12 +153,16 @@ stratt/  (local dir: warroom/)
 │   ├── telegram.js         # Webhook + inline keyboard
 │   └── reminders.js        # Smart cron (skip logic)
 └── public/
-    ├── index.html           # SPA (Auth + Chat + Board tabs)
-    ├── style.css            # OKLCH Phong Thủy design tokens
-    ├── app.js               # Frontend (chat + kanban + wake lock)
+    ├── index.html           # v1 SPA (Auth + Chat + Board + Calendar tabs) — legacy, served at / and /v1
+    ├── style.css            # v1 OKLCH Phong Thủy design tokens
+    ├── app.js               # v1 Frontend (chat + kanban + wake lock)
     ├── manifest.json        # PWA manifest
-    ├── icon-192.png         # PWA icon
-    └── icon-512.png         # PWA icon
+    ├── icon-192.png         # PWA icon (navy gradient + 🚀)
+    ├── icon-512.png         # PWA icon (navy gradient + 🚀)
+    └── v2/                  # (v2.0) Today-first UI — served at /v2 when DEFAULT_UI='v2'
+        ├── index.html       # 3 tabs: Hôm nay (default) / Chat / Board
+        ├── style.css        # @import /style.css + Today card/timeline styles
+        └── app.js           # Render /api/today, actions: Xong/Để sau, replan, overflow banner
 ```
 
 ---
@@ -179,6 +183,7 @@ stratt/  (local dir: warroom/)
 | POST | `/api/telegram` | Chat ID | Telegram webhook + callback_query |
 | POST | `/api/setup-telegram` | Cookie | Set Telegram webhook URL |
 | POST | `/api/mark-columns-for-deletion` | Cookie | One-time: mark database columns for manual deletion |
+| GET | `/api/today[?replan=1]` (v7) | Cookie | Day plan from Planner engine: `{ plan, replan, generated_at }` |
 
 ---
 
@@ -244,6 +249,7 @@ TELEGRAM_CHAT_ID    — Matt's Telegram chat ID
 5. 5 cron limit — CF free plan, internal dispatch.
 6. Rate limiter per-isolate — Resets on recycle. Fine for single-user.
 7. Notion pagination — Max 100 tasks per query with `has_more` support.
+8. **UI v2.0** is Today-first and lives at `/v2`; default at `/` is still v1 until `DEFAULT_UI='v2'` is flipped in `src/index.js` + redeploy.
 
 ---
 
@@ -284,6 +290,9 @@ TELEGRAM_CHAT_ID    — Matt's Telegram chat ID
 | **6.2** | **2026-06-13** | **Phase V6.3 — Notion DB cleanup: auto Block (AM/PM) derivation from scheduled_time, /api/mark-columns-for-deletion endpoint** |
 | **6.3** | **2026-06-13** | **Phase V6 Round 2 Fixes — early return analytics flush, overload warning in resolve path, direct_parse vs AI analytics split** |
 | **7.0** | **2026-06-17** | **Planner Engine P1 (core deterministic): `buildDayPlan` pure scheduler (gems: urgency+deadline+defer scoring, must-include guard, auto-park/push). Instant commands `xếp lịch`/`xếp lại`/`lịch tuần`. `applyDayPlan` batch writer. Reuses v6 confirm-card (ok→apply). 0 LLM in core.** |
+| **2.0** (UI) | **2026-06-17** | **UI v2 Today-first: parallel versioning (`/v1` rollback-safe, `/v2` opt-in via `DEFAULT_UI`). Today tab default — next-action card + timeline + overflow banner. Wires `/api/today`. Real PWA icons (1902/8080 byte). v1 board/calendar chưa đụng (mục 2/3/4 PLAN_UI — làm sau khi dogfood).** |
+| **2.0.1** (UI) | **2026-06-17** | **UI v2 Fix Round (PLAN_UI_FIXES): F1 wrangler.toml `binding='ASSETS'` + `run_worker_first=true` (fix `/v1` 500). F2 port v1 chat (sendChat/addMessage/confirm-card) sang v2 + nút `+` capture ở header. F3 nhãn cột Pending → "🅿️ Để dành" (chỉ display, giữ `data-status`).** |
+| **2.0.2** (UI) | **2026-06-17** | **UI v2 Fix Round 2: F1.1 BLOCKER redirect loop — `serveVersionedAsset` đổi sang fetch canonical-path (`/v2/`, `/`) thay vì tự chèn `/index.html`. Cloudflare Assets canonical-hoá `/index.html` → 307 → loop. Trailing-slash là canonical → 200 thẳng. F2/F3 xác nhận còn nguyên. 6/6 HTTP 200, 0 Location header, `DEFAULT_UI` flip 2 chiều work.** |
 
 
 
